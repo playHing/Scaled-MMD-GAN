@@ -10,7 +10,7 @@ import tensorflow as tf
 
 from mmd import mix_rbf_mmd2
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
-from utils import save_images, unpickle, read_and_scale
+from utils import save_images, unpickle, read_and_scale, center_and_scale
 
 
 class DCGAN(object):
@@ -221,7 +221,7 @@ class DCGAN(object):
 
         sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
 
-        generator = self.gen_train_samples()
+        generator = self.gen_train_samples_from_lmdb()
         if 'lsun' in self.dataset_name:
             required_samples = int(np.ceil(self.sample_size/float(self.batch_size)))
             sampled = [next(generator) for _ in xrange(required_samples)]
@@ -244,7 +244,6 @@ class DCGAN(object):
             print(batch_images.shape)
             batch_z = np.random.uniform(
                 -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
-
             if self.config.use_kernel:
                 if self.config.is_demo:
                     summary_str, step, kernel_loss = self.sess.run(
@@ -476,7 +475,7 @@ class DCGAN(object):
         return X/255.,y
 
 
-    def gen_train_samples(self):
+    def gen_train_samples_from_files(self):
         data_dir = os.path.join(self.data_dir, self.dataset_name)
         train_sample_files = os.listdir(data_dir)
         n_batches = len(train_sample_files) // self.batch_size
@@ -493,6 +492,32 @@ class DCGAN(object):
                 assert ims.shape == sh, "wrong shape: " + repr(ims.shape)
                 sampled += self.batch_size
                 yield ims
+                
+    def gen_train_samples_from_lmdb(self):
+        from PIL import Image
+        import lmdb
+        import io
+        data_dir = os.path.join(self.data_dir, self.dataset_name)
+        env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
+        sampled = 0
+        buff, buff_lim = [], 1000
+        sh = (self.batch_size, self.output_size, self.output_size, self.c_dim)
+        while True:
+            with env.begin(write=False) as txn:
+                cursor = txn.cursor()
+                for k, byte_arr in cursor:
+                    im = Image.open(io.BytesIO(byte_arr))
+                    buff.append(center_and_scale(im, size=self.output_size))
+                    if len(buff) >= buff_lim:
+                        buff = list(np.random.permutation(buff))
+                        n_batches = max(1, len(buff)//(10 * self.batch_size))
+                        for n in xrange(0, n_batches):
+                            batch = np.array(buff[n * self.batch_size: (n + 1) * self.batch_size])
+                            assert batch.shape == sh, "wrong shape: " + repr(batch.shape) + ", should be " + repr(sh)
+                            sampled == self.batch_size
+                            yield batch
+                        buff = buff[n_batches * self.batch_size:]
+        env.close()
 
         
     def save(self, checkpoint_dir, step):
