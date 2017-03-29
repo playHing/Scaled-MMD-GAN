@@ -10,7 +10,7 @@ import tensorflow as tf
 
 from mmd import mix_rbf_mmd2
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
-from utils import save_images
+from utils import save_images, unpickle, read_and_scale
 
 
 class DCGAN(object):
@@ -86,7 +86,14 @@ class DCGAN(object):
 
         tf.summary.histogram("z", self.z)
 
-        self.G = self.generator_mnist(self.z)
+        if self.config.dataset == 'cifar10':
+            self.G = self.generator_cifar10(self.z)
+        elif self.config.dataset == 'cifar10':
+            self.G = self.generator_mnist(self.z)
+        elif 'lsun' in self.config.dataset:
+            self.G = self.generator_lsun(self.z)
+        else:
+            raise Exception("not implemented dataset '%d'" % self.config.dataset)
         images = tf.reshape(self.images, [self.batch_size, -1])
         G = tf.reshape(self.G, [self.batch_size, -1])
 
@@ -96,10 +103,18 @@ class DCGAN(object):
         tf.summary.scalar("kernel_loss", self.kernel_loss)
         self.kernel_loss = tf.sqrt(self.kernel_loss)
 
-        tf.summary.image("train/input image", self.imageRearrange(tf.clip_by_value(self.images, 0, 1), 8))
-        tf.summary.image("train/gen image", self.imageRearrange(tf.clip_by_value(self.G, 0, 1), 8))
+        block = min(8, int(np.sqrt(self.batch_size)))
+        tf.summary.image("train/input image", self.imageRearrange(tf.clip_by_value(self.images, 0, 1), block))
+        tf.summary.image("train/gen image", self.imageRearrange(tf.clip_by_value(self.G, 0, 1), block))
 
-        self.sampler = self.generator_mnist(self.z, is_train=False, reuse=True)
+        if self.config.dataset == 'cifar10':
+            self.sampler = self.generator_cifar10(self.z, is_train=False, reuse=True)
+        elif self.config.dataset == 'mnist':
+            self.sampler = self.generator_mnist(self.z, is_train=False, reuse=True)
+        elif 'lsun' in self.config.dataset:
+            self.sampler = self.generator_lsun(self.z, is_train=False, reuse=True)
+        else:
+            self.sampler = self.generator_any_set(self.z, is_train=False, reuse=True)
         t_vars = tf.trainable_variables()
 
         self.d_vars = [var for var in t_vars if 'd_' in var.name]
@@ -107,25 +122,29 @@ class DCGAN(object):
 
         self.saver = tf.train.Saver()
 
-
     def train(self, config):
         """Train DCGAN"""
         if config.dataset == 'mnist':
             data_X, data_y = self.load_mnist()
+        elif config.dataset == 'cifar10':
+            data_X, data_y = self.load_cifar10()
         else:
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
-
         if self.config.use_kernel:
             kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9) \
                       .minimize(self.kernel_loss, var_list=self.g_vars, global_step=self.global_step)
 
         self.sess.run(tf.global_variables_initializer())
         TrainSummary = tf.summary.merge_all()
-        self.writer = tf.summary.FileWriter(self.log_dir, self.sess.graph)
+        dataset_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+        log_dir = os.path.join(self.log_dir, dataset_dir)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
 
         sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
 
-        if config.dataset == 'mnist':
+        if (config.dataset == 'mnist') or (config.dataset == 'cifar10'):
             sample_images = data_X[0:self.sample_size]
         else:
            return
@@ -137,7 +156,7 @@ class DCGAN(object):
         else:
             print(" [!] Load failed...")
 
-        if config.dataset == 'mnist':
+        if (config.dataset == 'mnist') or (config.dataset == 'cifar10'):
             batch_idxs = len(data_X) // config.batch_size
         else:
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
@@ -178,10 +197,83 @@ class DCGAN(object):
                 samples = self.sess.run(self.sampler, feed_dict={
                     self.z: sample_z, self.images: sample_images})
                 print(samples.shape)
-                p = os.path.join(self.sample_dir, 'train_{:02d}.png'.format(it))
+                dataset_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+                sample_dir = os.path.join(self.sample_dir, dataset_dir)
+                if not os.path.exists(sample_dir):
+                    os.makedirs(sample_dir)
+                p = os.path.join(sample_dir, 'train_{:02d}.png'.format(it))
                 save_images(samples[:64, :, :, :], [8, 8], p)
 
+    def train_large(self, config):
+        """Train DCGAN"""
+        if self.config.use_kernel:
+            kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9) \
+                      .minimize(self.kernel_loss, var_list=self.g_vars, global_step=self.global_step)
 
+        self.sess.run(tf.global_variables_initializer())
+        TrainSummary = tf.summary.merge_all()
+        dataset_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+        log_dir = os.path.join(self.log_dir, dataset_dir)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
+
+        sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
+
+        generator = self.gen_train_samples()
+        if 'lsun' in self.dataset_name:
+            required_samples = int(np.ceil(self.sample_size/float(self.batch_size)))
+            sampled = [next(generator) for _ in xrange(required_samples)]
+            sample_images = np.concatenate(sampled, axis=0)[: self.sample_size]
+        else:
+           return
+        counter = 1
+        start_time = time.time()
+
+        if self.load(self.checkpoint_dir):
+            print(" [*] Load SUCCESS")
+        else:
+            print(" [!] Load failed...")
+        lr = self.config.learning_rate
+        
+        for it in xrange(self.config.max_iteration):
+            if np.mod(it, 10000) == 1:
+                lr = lr * self.config.decay_rate
+            batch_images = next(generator)
+            print(batch_images.shape)
+            batch_z = np.random.uniform(
+                -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
+
+            if self.config.use_kernel:
+                if self.config.is_demo:
+                    summary_str, step, kernel_loss = self.sess.run(
+                        [TrainSummary, self.global_step, self.kernel_loss],
+                        feed_dict={self.lr: lr, self.images: batch_images,
+                                   self.z: batch_z})
+                else:
+                    _, summary_str, step, kernel_loss = self.sess.run(
+                        [kernel_optim, TrainSummary, self.global_step,
+                         self.kernel_loss],
+                        feed_dict={self.lr: lr, self.images: batch_images,
+                                   self.z: batch_z})
+
+            counter += 1
+            if np.mod(counter, 10) == 1:
+                self.writer.add_summary(summary_str, step)
+                print("Epoch: [%2d] time: %4.4f, kernel_loss: %.8f"
+                    % (it, time.time() - start_time, kernel_loss))
+            if np.mod(counter, 500) == 1:
+                self.save(self.checkpoint_dir, counter)
+                samples = self.sess.run(self.sampler, feed_dict={
+                    self.z: sample_z, self.images: sample_images})
+                print(samples.shape)
+                dataset_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+                sample_dir = os.path.join(self.sample_dir, dataset_dir)
+                if not os.path.exists(sample_dir):
+                    os.makedirs(sample_dir)
+                p = os.path.join(sample_dir, 'train_{:02d}.png'.format(it))
+                save_images(samples[:64, :, :, :], [8, 8], p)
+                
     def sampling(self, config):
         self.sess.run(tf.global_variables_initializer())
         print(self.checkpoint_dir)
@@ -245,6 +337,34 @@ class DCGAN(object):
         return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, 28, 28, 1])
 
 
+    def generator_cifar10(self, z, is_train=True, reuse=False):
+        if reuse:
+            tf.get_variable_scope().reuse_variables()
+        h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
+        h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
+        h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
+        h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
+        h4 = linear(tf.nn.relu(h3), 32 * 32 * 3, 'g_h4_lin', stddev=self.config.init)
+
+        return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, 32, 32, 3]) 
+
+
+    def generator_any_set(self, z, is_train=True, reuse=False):
+        if reuse:
+            tf.get_variable_scope().reuse_variables()
+        h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
+        h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
+        h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
+        h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
+        h4 = linear(tf.nn.relu(h3), self.output_size**2 * self.c_dim, 
+                    'g_h4_lin', stddev=self.config.init)
+
+        return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, self.output_size, 
+                                              self.output_size, self.c_dim])
+        
+    def generator_lsun(self, z, is_train=True, reuse=False):
+        return self.generator_any_set(z, is_train=is_train, reuse=reuse)
+        
     def generator(self, z, y=None, is_train=True, reuse=False):
         if reuse:
             tf.get_variable_scope().reuse_variables()
@@ -326,6 +446,54 @@ class DCGAN(object):
         return X/255.,y
 
 
+    def load_cifar10(self, categories=[0]):
+        data_dir = os.path.join("./data", self.dataset_name)
+
+        batchesX, batchesY = [], []
+        for batch in range(1,6):
+            loaded = unpickle(os.path.join(data_dir, 'data_batch_%d' % batch))
+            idx = np.in1d(np.array(loaded['labels']), categories)
+            batchesX.append(loaded['data'][idx].reshape(idx.sum(), 3, 32, 32))
+            batchesY.append(np.array(loaded['labels'])[idx])
+        trX = np.concatenate(batchesX, axis=0).transpose(0, 2, 3, 1)
+        trY = np.concatenate(batchesY, axis=0)
+        
+        test = unpickle(os.path.join(data_dir, 'test_batch'))
+        idx = np.in1d(np.array(test['labels']), categories)
+        teX = test['data'][idx].reshape(idx.sum(), 3, 32, 32).transpose(0, 2, 3, 1)
+        teY = np.array(test['labels'])[idx]
+
+        X = np.concatenate((trX, teX), axis=0)
+        y = np.concatenate((trY, teY), axis=0)
+
+        seed = 547
+        np.random.seed(seed)
+        np.random.shuffle(X)
+        np.random.seed(seed)
+        np.random.shuffle(y)
+
+        return X/255.,y
+
+
+    def gen_train_samples(self):
+        data_dir = os.path.join("./data", self.dataset_name)
+        train_sample_files = os.listdir(data_dir)
+        n_batches = len(train_sample_files) // self.batch_size
+        train_sample_files = train_sample_files[:self.batch_size * n_batches]
+        sampled = 0
+        while True:
+            train_sample_files = np.random.permutation(train_sample_files)
+            batch_files_array = train_sample_files.reshape(n_batches, self.batch_size)
+            for batch_files in batch_files_array:
+                ims = [[read_and_scale(os.path.join("./data", self.dataset_name, f), 
+                                       size=float(self.output_size))] for f in batch_files]
+                ims = np.concatenate(ims, axis=0)
+                sh = (self.batch_size, self.output_size, self.output_size, self.c_dim)
+                assert ims.shape == sh, "wrong shape: " + repr(ims.shape)
+                sampled += self.batch_size
+                yield ims
+
+        
     def save(self, checkpoint_dir, step):
         model_name = "DCGAN.model"
         model_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)

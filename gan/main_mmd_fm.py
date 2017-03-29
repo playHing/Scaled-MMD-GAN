@@ -18,8 +18,8 @@ flags.DEFINE_integer("train_size", np.inf, "The size of train images [np.inf]")
 flags.DEFINE_integer("batch_size", 1000, "The size of batch images [64]")
 flags.DEFINE_integer("output_size", 64, "The size of the output images to produce [64]")
 flags.DEFINE_integer("c_dim", 3, "Dimension of image color. [3]")
-flags.DEFINE_string("dataset", "mnist", "The name of dataset [celebA, mnist, lsun]")
-flags.DEFINE_string("name", "mmd_fm_test", "The name of dataset [celebA, mnist, lsun]")
+flags.DEFINE_string("dataset", "mnist", "The name of dataset [celebA, mnist, lsun, cifar10]")
+flags.DEFINE_string("name", "mmd_fm_test", "The name of dataset [celebA, mnist, lsun, cifar10]")
 flags.DEFINE_string("checkpoint_dir", "checkpoint_mmd_fm", "Directory name to save the checkpoints [checkpoint_mmd_fm]")
 flags.DEFINE_string("sample_dir", "samples_mmd_fm", "Directory name to save the image samples [samples_mmd_fm]")
 flags.DEFINE_string("log_dir", "logs_mmd_fm", "Directory name to save the tensorboard log [logs_mmd_fm]")
@@ -51,6 +51,9 @@ def main(_):
     with tf.Session() as sess:
         if FLAGS.dataset == 'mnist':
             dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
+                    dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, sample_dir=sample_dir_, log_dir=log_dir_)
+        elif FLAGS.dataset == 'cifar10':
+            dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
                     dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, sample_dir=sample_dir_, log_dir=log_dir_)
         else:
             dcgan = DCGAN(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,

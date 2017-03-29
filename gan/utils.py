@@ -188,3 +188,27 @@ def visualize(sess, dcgan, config, option):
         merge(np.array([images[idx] for images in image_set]), [10, 10])
         for idx in range(64) + range(63, -1, -1)]
     make_gif(new_image_set, './samples/test_gif_merged.gif', duration=8)
+
+
+
+def unpickle(file):
+    import _pickle as cPickle
+    fo = open(file, 'rb')
+    dict = cPickle.load(fo, encoding='latin1')
+    fo.close()
+    return dict
+ 
+    
+from PIL import Image    
+def read_and_scale(file, size=64.):
+    im = Image.open(file)
+    arr = np.array(im)
+    scale = min(im.size)/size
+    new_size = np.array(im.size)/scale
+    im.thumbnail(new_size)
+    arr = np.array(im)
+    l0 = int((arr.shape[0] - size)//2)
+    l1 = int((arr.shape[1] - size)//2)  
+    arr = arr[l0:l0 + int(size), l1: l1 + int(size), :]
+    assert arr.shape == (size, size, 3), "shape error: " + repr(arr.shape)
+    return arr
