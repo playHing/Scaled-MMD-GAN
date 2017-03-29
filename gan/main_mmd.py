@@ -22,6 +22,7 @@ flags.DEFINE_string("name", "mmd_test", "The name of dataset [celebA, mnist, lsu
 flags.DEFINE_string("checkpoint_dir", "checkpoint_mmd", "Directory name to save the checkpoints [checkpoint_mmd]")
 flags.DEFINE_string("sample_dir", "samples_mmd", "Directory name to save the image samples [samples_mmd]")
 flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image samples [logs_mmd]")
+flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
 flags.DEFINE_boolean("is_train", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("is_crop", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothing [False]")
@@ -46,20 +47,21 @@ def main(_):
         if FLAGS.dataset == 'mnist':
             dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
-                          sample_dir=sample_dir_, log_dir=log_dir_)
+                          sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         elif FLAGS.dataset == 'cifar10':
             dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
-                          sample_dir=sample_dir_, log_dir=log_dir_)
+                          sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         elif 'lsun' in FLAGS.dataset:
             dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
-                          sample_dir=sample_dir_, log_dir=log_dir_)
+                          sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         else:
             dcgan = DCGAN(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, 
                           output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, 
-                          checkpoint_dir=FLAGS.checkpoint_dir, sample_dir=FLAGS.sample_dir)
+                          checkpoint_dir=FLAGS.checkpoint_dir, sample_dir=FLAGS.sample_dir,
+                          data_dir=FLAGS.data_dir)
 
         if FLAGS.is_train:
             if 'lsun' in FLAGS.dataset:

@@ -18,7 +18,7 @@ class DCGAN(object):
                  batch_size=64, output_size=64,
                  z_dim=100, gf_dim=64, df_dim=64,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
-                 checkpoint_dir=None, sample_dir=None, log_dir=None):
+                 checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
         """
         Args:
             sess: TensorFlow session
@@ -41,6 +41,7 @@ class DCGAN(object):
         self.sample_dir = sample_dir
         self.log_dir=log_dir
         self.checkpoint_dir = checkpoint_dir
+        self.data_dir = data_dir
         self.z_dim = z_dim
 
         self.gf_dim = gf_dim
@@ -184,8 +185,8 @@ class DCGAN(object):
 
         self.sess.run(tf.global_variables_initializer())
         TrainSummary = tf.summary.merge_all()
-        dataset_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
-        log_dir = os.path.join(self.log_dir, dataset_dir)
+        dataset_desc = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+        log_dir = os.path.join(self.log_dir, dataset_desc)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
@@ -253,8 +254,8 @@ class DCGAN(object):
                 samples = self.sess.run(self.sampler, feed_dict={
                     self.z: sample_z, self.images: sample_images})
                 print(samples.shape)
-                dataset_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
-                sample_dir = os.path.join(self.sample_dir, dataset_dir)
+                dataset_desc = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+                sample_dir = os.path.join(self.sample_dir, dataset_desc)
                 if not os.path.exists(sample_dir):
                     os.makedirs(sample_dir)
                 p = os.path.join(sample_dir, 'train_{:02d}.png'.format(it))
@@ -406,7 +407,7 @@ class DCGAN(object):
 
 
     def load_mnist(self):
-        data_dir = os.path.join("./data", self.dataset_name)
+        data_dir = os.path.join(self.data_dir, self.dataset_name)
 
         fd = open(os.path.join(data_dir,'train-images-idx3-ubyte'))
         loaded = np.fromfile(file=fd,dtype=np.uint8)
@@ -440,7 +441,7 @@ class DCGAN(object):
 
         
     def load_cifar10(self, categories=[0]):
-        data_dir = os.path.join("./data", self.dataset_name)
+        data_dir = os.path.join(self.data_dir, self.dataset_name)
 
         batchesX, batchesY = [], []
         for batch in range(1,6):
