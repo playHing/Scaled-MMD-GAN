@@ -125,7 +125,6 @@ class DCGAN(object):
             data_X, data_y = self.load_cifar10()
         else:
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
-
         if self.config.use_kernel:
             kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9) \
                       .minimize(self.ratio_loss, var_list=self.g_vars, global_step=self.global_step)

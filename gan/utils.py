@@ -197,18 +197,25 @@ def unpickle(file):
     dict = cPickle.load(fo, encoding='latin1')
     fo.close()
     return dict
- 
-    
-from PIL import Image    
-def read_and_scale(file, size=64.):
-    im = Image.open(file)
+
+
+def center_and_scale(im, size=64) :
+    size = int(size)
     arr = np.array(im)
-    scale = min(im.size)/size
+    scale = min(im.size)/float(size)
     new_size = np.array(im.size)/scale
     im.thumbnail(new_size)
     arr = np.array(im)
+    assert min(arr.shape[:2]) == size, "shape error: " + repr(arr.shape) + ", lower dim should be " + repr(size)
     l0 = int((arr.shape[0] - size)//2)
     l1 = int((arr.shape[1] - size)//2)  
-    arr = arr[l0:l0 + int(size), l1: l1 + int(size), :]
-    assert arr.shape == (size, size, 3), "shape error: " + repr(arr.shape)
+    arr = arr[l0:l0 + size, l1: l1 + size, :]
+    sh = (size, size, 3)
+    assert arr.shape == sh, "shape error: " + repr(arr.shape) + ", should be " + repr(sh)
     return arr
+    
+
+def read_and_scale(file, size=64):
+    from PIL import Image
+    im = Image.open(file)
+    return center_and_scale(im, size=size)

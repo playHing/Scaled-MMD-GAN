@@ -165,6 +165,7 @@ class DCGAN(object):
 
         self.saver = tf.train.Saver()
 
+
     def train(self, config):
         """Train DCGAN"""
         if config.dataset == 'mnist':
@@ -220,6 +221,92 @@ class DCGAN(object):
             idx = np.mod(it, batch_idxs)
             batch_images = data_X[perm[idx*config.batch_size:
                                        (idx+1)*config.batch_size]]
+
+            batch_z = np.random.uniform(
+                -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
+
+            if self.config.use_kernel:
+                _, summary_str, step, kernel_loss = self.sess.run(
+                    [kernel_d_optim, TrainSummary, self.global_step,
+                     self.kernel_loss],
+                    feed_dict={self.lr: lr,
+                               self.images: batch_images,
+                               self.z: batch_z})
+                _, summary_str, step, kernel_loss = self.sess.run(
+                    [kernel_g_optim, TrainSummary, self.global_step,
+                     self.kernel_loss],
+                    feed_dict={self.lr: lr,
+                               self.images: batch_images,
+                               self.z: batch_z})
+            counter += 1
+            if np.mod(counter, 10) == 1:
+                if self.config.use_gan:
+                    d_loss = self.sess.run(
+                        self.d_loss,
+                        feed_dict={self.lr: lr,
+                                   self.images: batch_images,
+                                   self.z: batch_z})
+                self.writer.add_summary(summary_str, step)
+                print(("optmmd Epoch: [%2d] time: %4.4f, kernel_loss: %.8f, "
+                       "d_loss: %.8f")
+                      % (it, time.time() - start_time, kernel_loss, d_loss))
+            if np.mod(counter, 500) == 1:
+                self.save(self.checkpoint_dir, counter)
+                samples = self.sess.run(self.sampler, feed_dict={
+                    self.z: sample_z, self.images: sample_images})
+                print(samples.shape)
+                dataset_desc = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+                sample_dir = os.path.join(self.sample_dir, dataset_desc)
+                if not os.path.exists(sample_dir):
+                    os.makedirs(sample_dir)
+                p = os.path.join(sample_dir, 'train_{:02d}.png'.format(it))
+                save_images(samples[:64, :, :, :], [8, 8], p)
+
+
+    def train_large(self, config):
+        """Train DCGAN"""
+        data_dir = os.path.join(self.data_dir, config.dataset)
+        if self.config.use_kernel:
+            kernel_g_optim = tf.train.MomentumOptimizer(self.lr, 0.9) \
+                      .minimize(self.kernel_loss, var_list=self.g_vars, global_step=self.global_step)
+            if self.config.use_gan:
+                kernel_d_optim = tf.train.MomentumOptimizer(self.config.kernel_d_learning_rate * self.lr, 0.9) \
+                      .minimize(self.d_loss, var_list=self.dk_vars)
+            else:
+                kernel_d_optim = tf.train.MomentumOptimizer(self.config.kernel_d_learning_rate * self.lr, 0.9) \
+                        .minimize((-1) * self.kernel_loss, var_list=self.dk_vars)
+
+        self.sess.run(tf.global_variables_initializer())
+        TrainSummary = tf.summary.merge_all()
+        dataset_desc = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+        log_dir = os.path.join(self.log_dir, dataset_desc)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
+
+        sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
+
+        generator = self.gen_train_samples_from_lmdb()
+        if 'lsun' in self.dataset_name:
+            required_samples = int(np.ceil(self.sample_size/float(self.batch_size)))
+            sampled = [next(generator) for _ in xrange(required_samples)]
+            sample_images = np.concatenate(sampled, axis=0)[: self.sample_size]
+        else:
+           return
+        counter = 1
+        start_time = time.time()
+
+        if self.load(self.checkpoint_dir):
+            print(" [*] Load SUCCESS")
+        else:
+            print(" [!] Load failed...")
+
+        lr = self.config.learning_rate
+        d_loss = 0
+        for it in xrange(self.config.max_iteration):
+            if np.mod(it, 10000) == 1:
+                lr = lr * self.config.decay_rate
+            batch_images = next(generator)
 
             batch_z = np.random.uniform(
                 -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
@@ -358,6 +445,23 @@ class DCGAN(object):
 
         return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, 32, 32, 3]) 
 
+
+    def generator_any_set(self, z, is_train=True, reuse=False):
+        if reuse:
+            tf.get_variable_scope().reuse_variables()
+        h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
+        h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
+        h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
+        h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
+        h4 = linear(tf.nn.relu(h3), self.output_size**2 * self.c_dim, 
+                    'g_h4_lin', stddev=self.config.init)
+
+        return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, self.output_size, 
+                                              self.output_size, self.c_dim])
+
+    def generator_lsun(self, z, is_train=True, reuse=False):
+        return self.generator_any_set(z, is_train=is_train, reuse=reuse)
+
         
     def generator(self, z, y=None, is_train=True, reuse=False):
         if reuse:
@@ -468,6 +572,33 @@ class DCGAN(object):
 
         return X/255.,y
 
+        
+    def gen_train_samples_from_lmdb(self):
+        from PIL import Image
+        import lmdb
+        import io
+        data_dir = os.path.join(self.data_dir, self.dataset_name)
+        env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
+        sampled = 0
+        buff, buff_lim = [], 1000
+        sh = (self.batch_size, self.output_size, self.output_size, self.c_dim)
+        while True:
+            with env.begin(write=False) as txn:
+                cursor = txn.cursor()
+                for k, byte_arr in cursor:
+                    im = Image.open(io.BytesIO(byte_arr))
+                    buff.append(center_and_scale(im, size=self.output_size))
+                    if len(buff) >= buff_lim:
+                        buff = list(np.random.permutation(buff))
+                        n_batches = max(1, len(buff)//(10 * self.batch_size))
+                        for n in xrange(0, n_batches):
+                            batch = np.array(buff[n * self.batch_size: (n + 1) * self.batch_size])
+                            assert batch.shape == sh, "wrong shape: " + repr(batch.shape) + ", should be " + repr(sh)
+                            sampled == self.batch_size
+                            yield batch
+                        buff = buff[n_batches * self.batch_size:]
+        env.close()
+        
         
     def save(self, checkpoint_dir, step):
         model_name = "DCGAN.model"

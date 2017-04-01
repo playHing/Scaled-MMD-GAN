@@ -241,7 +241,6 @@ class DCGAN(object):
             if np.mod(it, 10000) == 1:
                 lr = lr * self.config.decay_rate
             batch_images = next(generator)
-            print(batch_images.shape)
             batch_z = np.random.uniform(
                 -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
             if self.config.use_kernel:
@@ -492,6 +491,7 @@ class DCGAN(object):
                 assert ims.shape == sh, "wrong shape: " + repr(ims.shape)
                 sampled += self.batch_size
                 yield ims
+
                 
     def gen_train_samples_from_lmdb(self):
         from PIL import Image

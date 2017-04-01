@@ -27,6 +27,7 @@ flags.DEFINE_boolean("is_train", False, "True for training, False for testing [F
 flags.DEFINE_boolean("is_crop", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothing [False]")
 flags.DEFINE_boolean("use_kernel", False, "True for visualizing, False for nothing [False]")
+flags.DEFINE_boolean("threads", np.inf, "Upper limit for number of threads [np.inf]")
 
 FLAGS = flags.FLAGS
 
@@ -42,7 +43,11 @@ def main(_):
     if not os.path.exists(log_dir_):
         os.makedirs(log_dir_)
 
-    with tf.Session() as sess:
+    if FLAGS.threads < np.inf:
+        sess_config = tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)
+    else:
+        sess_config = tf.ConfigProto()
+    with tf.Session(config=sess_config) as sess:
         if FLAGS.dataset == 'mnist':
             dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
                     dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
