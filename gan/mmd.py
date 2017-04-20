@@ -37,12 +37,85 @@ def _mix_rbf_kernel(X, Y, sigmas, wts=None):
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
 
 
+def _mix_rq_kernel(X, Y, alphas=[1], wts=None):
+    """
+    Rational quadratic kernel
+    http://www.cs.toronto.edu/~duvenaud/cookbook/index.html
+    """
+    if wts is None:
+        wts = [1] * len(alphas)
+
+    XX = tf.matmul(X, X, transpose_b=True)
+    XY = tf.matmul(X, Y, transpose_b=True)
+    YY = tf.matmul(Y, Y, transpose_b=True)
+
+    X_sqnorms = tf.diag_part(XX)
+    Y_sqnorms = tf.diag_part(YY)
+
+    r = lambda x: tf.expand_dims(x, 0)
+    c = lambda x: tf.expand_dims(x, 1)
+
+    K_XX, K_XY, K_YY = 0, 0, 0
+    for alpha, wt in zip(alphas, wts):
+        K_XX += wt * tf.exp(-alpha * tf.log(1 + (-2 * XX + c(X_sqnorms) + r(X_sqnorms))/alpha))
+        K_XY += wt * tf.exp(-alpha * tf.log(1 + (-2 * XY + c(X_sqnorms) + r(Y_sqnorms))/alpha))
+        K_YY += wt * tf.exp(-alpha * tf.log(1 + (-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))/alpha))
+
+    return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
+
+
+def _mix_di_kernel(X, Y, z, alphas, wts=None):
+    """
+    distance - induced kernel
+    k_{alpha,z}(x,x') = d^alpha(x, z) + d^alpha(x', z) - d^alpha(x, x')
+    """
+    if wts is None:
+        wts = [1] * len(alphas)
+
+    XX = tf.matmul(X, X, transpose_b=True)
+    XY = tf.matmul(X, Y, transpose_b=True)
+    Xz = tf.matmul(X, z, transpose_b=True)
+    YY = tf.matmul(Y, Y, transpose_b=True)
+    Yz = tf.matmul(Y, z, transpose_b=True)
+    zz = tf.matmul(z, z, transpose_b=True)
+    
+    X_sqnorms = tf.diag_part(XX)
+    Y_sqnorms = tf.diag_part(YY)
+    z_sqnorms = tf.diag_part(zz)
+
+    r = lambda x: tf.expand_dims(x, 0)
+    c = lambda x: tf.expand_dims(x, 1)
+
+    d_Xz = c(X_sqnorms) + r(z_sqnorms) - 2 * Xz
+    d_Yz = c(Y_sqnorms) + r(z_sqnorms) - 2 * Yz
+
+    K_XX, K_XY, K_YY = 0, 0, 0
+    for alpha, wt in zip(alphas, wts):
+        p = lambda x: tf.exp(alpha * tf.log(x))
+        
+        K_XX += wt * (p(d_Xz) + p(tf.transpose(d_Xz)) - p(c(X_sqnorms) + r(X_sqnorms) - 2 * XX))
+        K_XY += wt * (p(d_Xz) + p(tf.transpose(d_Yz)) - p(c(X_sqnorms) + r(Y_sqnorms) - 2 * XY))
+        K_YY += wt * (p(d_Yz) + p(tf.transpose(d_Yz)) - p(c(Y_sqnorms) + r(Y_sqnorms) - 2 * YY))
+
+    return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
+
+
 def rbf_mmd2(X, Y, sigma=1, biased=True):
     return mix_rbf_mmd2(X, Y, sigmas=[sigma], biased=biased)
 
 
 def mix_rbf_mmd2(X, Y, sigmas=(1,), wts=None, biased=True):
     K_XX, K_XY, K_YY, d = _mix_rbf_kernel(X, Y, sigmas, wts)
+    return _mmd2(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
+
+
+def mix_rq_mmd2(X, Y, alphas=(1,), wts=None, biased=True):
+    K_XX, K_XY, K_YY, d = _mix_rq_kernel(X, Y, alphas, wts)
+    return _mmd2(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
+
+
+def mix_di_mmd2(X, Y, z, alphas=(1,), wts=None, biased=True):
+    K_XX, K_XY, K_YY, d = _mix_di_kernel(X, Y, z, alphas, wts)
     return _mmd2(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
 
 

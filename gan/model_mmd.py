@@ -8,7 +8,7 @@ import scipy.misc
 from six.moves import xrange
 import tensorflow as tf
 
-from mmd import mix_rbf_mmd2
+import mmd
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from utils import save_images, unpickle, read_and_scale, center_and_scale
 
@@ -18,7 +18,8 @@ class DCGAN(object):
                  batch_size=64, output_size=64,
                  z_dim=100, gf_dim=64, df_dim=64,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
-                 checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
+                 checkpoint_dir=None, sample_dir=None, log_dir=None, 
+                 data_dir=None):
         """
         Args:
             sess: TensorFlow session
@@ -53,9 +54,9 @@ class DCGAN(object):
         self.c_dim = c_dim
 
         # batch normalization : deals with poor initialization helps gradient flow
-        self.d_bn1 = batch_norm(name='d_bn1')
-        self.d_bn2 = batch_norm(name='d_bn2')
-        self.d_bn3 = batch_norm(name='d_bn3')
+#        self.d_bn1 = batch_norm(name='d_bn1')
+#        self.d_bn2 = batch_norm(name='d_bn2')
+#        self.d_bn3 = batch_norm(name='d_bn3')
 
         self.g_bn0 = batch_norm(name='g_bn0')
         self.g_bn1 = batch_norm(name='g_bn1')
@@ -75,14 +76,26 @@ class DCGAN(object):
             [1, self.output_size * block, self.output_size * block, self.c_dim])
         return image_r
 
-
+        
     def build_model(self):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.lr = tf.placeholder(tf.float32, shape=[])
-        self.images = tf.placeholder(tf.float32, [self.batch_size] + [self.output_size, self.output_size, self.c_dim],
-                                    name='real_images')
-        self.sample_images= tf.placeholder(tf.float32, [self.sample_size] + [self.output_size, self.output_size, self.c_dim],
-                                        name='sample_images')
+        self.images = tf.placeholder(
+            tf.float32, 
+            [self.batch_size, self.output_size, self.output_size, self.c_dim],
+            name='real_images'
+        )
+        self.sample_images = tf.placeholder(
+            tf.float32, 
+            [self.sample_size, self.output_size, self.output_size, self.c_dim],
+            name='sample_images'
+        )
+        if self.config.kernel == 'di':
+            self.di_kernel_z_images = tf.placeholder(
+                tf.float32, 
+                [self.batch_size, self.output_size, self.output_size, self.c_dim],
+                name='di_kernel_z_images'
+            )
         self.z = tf.placeholder(tf.float32, [None, self.z_dim], name='z')
 
         tf.summary.histogram("z", self.z)
@@ -95,12 +108,31 @@ class DCGAN(object):
             self.G = self.generator_lsun(self.z)
         else:
             raise Exception("not implemented dataset '%s'" % self.config.dataset)
-        images = tf.reshape(self.images, [self.batch_size, -1])
-        G = tf.reshape(self.G, [self.batch_size, -1])
+        if self.config.dc_discriminator:
+            images = self.discriminator(self.images, reuse=False)
+            G = self.discriminator(self.G, reuse=True)
+        else:
+            images = tf.reshape(self.images, [self.batch_size, -1])
+            G = tf.reshape(self.G, [self.batch_size, -1])
 
-        bandwidths = [2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
-        self.kernel_loss = mix_rbf_mmd2(G, images, sigmas=bandwidths)
-
+        if self.config.kernel == 'rbf': # Gaussian kernel
+            bandwidths = [2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
+            self.kernel_loss = mmd.mix_rbf_mmd2(G, images, sigmas=bandwidths)
+        elif self.config.kernel == 'rq': # Rational quadratic kernel
+            alphas = [.1, .2, .5, 1.0, 2.0]
+            self.kernel_loss = mmd.mix_rq_mmd2(G, images, alphas=alphas)
+        elif self.config.kernel == 'di': # Distance - induced kernel
+            alphas = [.5, 1.0]
+            di_r = np.random.choice(np.arange(self.batch_size))
+            if self.config.dc_discriminator:
+                self.di_kernel_z = self.discriminator(
+                        self.di_kernel_z_images, reuse=True)[di_r: di_r + 1]
+            else:
+                self.di_kernel_z = tf.reshape(self.di_kernel_z_images[di_r: di_r + 1], [1, -1])
+            self.kernel_loss = mmd.mix_di_mmd2(G, images, self.di_kernel_z, 
+                                               alphas=alphas)
+        else:
+            raise Exception("Kernel '%s' not implemented" % self.config.kernel)
         tf.summary.scalar("kernel_loss", self.kernel_loss)
         self.kernel_loss = tf.sqrt(self.kernel_loss)
 
@@ -137,7 +169,8 @@ class DCGAN(object):
 
         self.sess.run(tf.global_variables_initializer())
         TrainSummary = tf.summary.merge_all()
-        dataset_desc = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+        dataset_desc = "%s_%s_%s_%s_%s" % (self.dataset_name, self.config.architecture,
+            self.config.kernel, self.batch_size, self.output_size)
         log_dir = os.path.join(self.log_dir, dataset_desc)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
@@ -147,6 +180,7 @@ class DCGAN(object):
 
         if (config.dataset == 'mnist') or (config.dataset == 'cifar10'):
             sample_images = data_X[0:self.sample_size]
+            di_kernel_z_images = data_X[0: self.batch_size]
         else:
            return
         counter = 1
@@ -176,29 +210,39 @@ class DCGAN(object):
                 -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
 
             if self.config.use_kernel:
+                feed_dict = {self.lr: lr, self.images: batch_images,
+                             self.z: batch_z}
+                if self.config.kernel == 'di':
+                    feed_dict.update({self.di_kernel_z_images: di_kernel_z_images})
                 if self.config.is_demo:
                     summary_str, step, kernel_loss = self.sess.run(
                         [TrainSummary, self.global_step, self.kernel_loss],
-                        feed_dict={self.lr: lr, self.images: batch_images,
-                                   self.z: batch_z})
+                        feed_dict=feed_dict)
                 else:
                     _, summary_str, step, kernel_loss = self.sess.run(
                         [kernel_optim, TrainSummary, self.global_step,
-                         self.kernel_loss],
-                        feed_dict={self.lr: lr, self.images: batch_images,
-                                   self.z: batch_z})
+                         self.kernel_loss], feed_dict=feed_dict)
 
             counter += 1
             if np.mod(counter, 10) == 1:
                 self.writer.add_summary(summary_str, step)
                 print("Epoch: [%2d] time: %4.4f, kernel_loss: %.8f"
                     % (it, time.time() - start_time, kernel_loss))
+#                print('D_VARS')
+#                for var in self.d_vars:
+#                    print(var.name, self.sess.run(var).mean())
+#                print('G_VARS')
+#                for var in self.g_vars:
+#                    print(var.name, self.sess.run(var).mean())                
             if np.mod(counter, 500) == 1:
                 self.save(self.checkpoint_dir, counter)
                 samples = self.sess.run(self.sampler, feed_dict={
                     self.z: sample_z, self.images: sample_images})
                 print(samples.shape)
-                dataset_desc = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+                dataset_desc = "%s_%s_%s_%s_%s" % (self.dataset_name, 
+                    self.config.architecture, self.config.kernel, 
+                    self.batch_size, self.output_size
+                )
                 sample_dir = os.path.join(self.sample_dir, dataset_desc)
                 if not os.path.exists(sample_dir):
                     os.makedirs(sample_dir)
@@ -213,7 +257,8 @@ class DCGAN(object):
 
         self.sess.run(tf.global_variables_initializer())
         TrainSummary = tf.summary.merge_all()
-        dataset_desc = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+        dataset_desc = "%s_%s_%s_%s_%s" % (self.dataset_name, self.config.architecture,
+            self.config.kernel, self.batch_size, self.output_size)
         log_dir = os.path.join(self.log_dir, dataset_desc)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
@@ -226,6 +271,7 @@ class DCGAN(object):
             required_samples = int(np.ceil(self.sample_size/float(self.batch_size)))
             sampled = [next(generator) for _ in xrange(required_samples)]
             sample_images = np.concatenate(sampled, axis=0)[: self.sample_size]
+            di_kernel_z_images = next(generator)#sampled[0]
         else:
            return
         counter = 1
@@ -236,7 +282,7 @@ class DCGAN(object):
         else:
             print(" [!] Load failed...")
         lr = self.config.learning_rate
-        
+        di_r = np.random.choice(np.arange(self.sample_size))
         for it in xrange(self.config.max_iteration):
             if np.mod(it, 10000) == 1:
                 lr = lr * self.config.decay_rate
@@ -244,17 +290,18 @@ class DCGAN(object):
             batch_z = np.random.uniform(
                 -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
             if self.config.use_kernel:
+                feed_dict = {self.lr: lr, self.images: batch_images,
+                             self.z: batch_z}
+                if self.config.kernel == 'di':
+                    feed_dict.update({self.di_kernel_z_images: di_kernel_z_images})
                 if self.config.is_demo:
                     summary_str, step, kernel_loss = self.sess.run(
                         [TrainSummary, self.global_step, self.kernel_loss],
-                        feed_dict={self.lr: lr, self.images: batch_images,
-                                   self.z: batch_z})
+                        feed_dict=feed_dict)
                 else:
                     _, summary_str, step, kernel_loss = self.sess.run(
                         [kernel_optim, TrainSummary, self.global_step,
-                         self.kernel_loss],
-                        feed_dict={self.lr: lr, self.images: batch_images,
-                                   self.z: batch_z})
+                         self.kernel_loss], feed_dict=feed_dict)
 
             counter += 1
             if np.mod(counter, 10) == 1:
@@ -266,7 +313,10 @@ class DCGAN(object):
                 samples = self.sess.run(self.sampler, feed_dict={
                     self.z: sample_z, self.images: sample_images})
                 print(samples.shape)
-                dataset_desc = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+                dataset_desc = "%s_%s_%s_%s_%s" % (self.dataset_name, 
+                    self.config.architecture, self.config.kernel, 
+                    self.batch_size, self.output_size
+                )
                 sample_dir = os.path.join(self.sample_dir, dataset_desc)
                 if not os.path.exists(sample_dir):
                     os.makedirs(sample_dir)
@@ -302,26 +352,31 @@ class DCGAN(object):
 
 
     def discriminator(self, image, y=None, reuse=False):
-        if reuse:
-            tf.get_variable_scope().reuse_variables()
-
-        s = self.output_size
-        if np.mod(s, 16) == 0:
-            h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
-            h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
-            h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
-            h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
-            h4 = linear(tf.reshape(h3, [self.batch_size, -1]), 1, 'd_h3_lin')
-
-            return tf.nn.sigmoid(h4), h4
-        else:
-            h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
-            h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
-            h2 = linear(tf.reshape(h1, [self.batch_size, -1]), 1, 'd_h2_lin')
-            if not self.config.use_kernel:
-              return tf.nn.sigmoid(h2), h2
+        with tf.variable_scope("discriminator") as scope:
+            if reuse:
+                scope.reuse_variables()
+    
+            s = self.output_size
+            if np.mod(s, 16) == 0:
+                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
+#                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
+#                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
+#                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
+                h1 = lrelu(batch_norm(name='d_bn1')(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
+                h2 = lrelu(batch_norm(name='d_bn2')(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
+                h3 = lrelu(batch_norm(name='d_bn3')(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
+#                h4 = linear(tf.reshape(h3, [self.batch_size, -1]), 1, 'd_h3_lin')
+                return tf.nn.sigmoid(tf.reshape(h3, [self.batch_size, -1]))
+#                return tf.nn.sigmoid(h4), h4
             else:
-              return tf.nn.sigmoid(h2), h2, h1, h0
+                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
+                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
+                h2 = linear(tf.reshape(h1, [self.batch_size, -1]), 1, 'd_h2_lin')
+                if not self.config.use_kernel:
+                    return h2
+#                  return tf.nn.sigmoid(h2), h2
+                else:
+                  return tf.nn.sigmoid(h2), h2, h1, h0
 
 
     def generator_mnist(self, z, is_train=True, reuse=False):
@@ -362,7 +417,11 @@ class DCGAN(object):
                                               self.output_size, self.c_dim])
         
     def generator_lsun(self, z, is_train=True, reuse=False):
-        return self.generator_any_set(z, is_train=is_train, reuse=reuse)
+        if self.config.architecture == 'dc':
+            return self.generator(z, is_train=is_train, reuse=reuse)
+        elif self.config.architecture == 'mlp':
+            return self.generator_any_set(z, is_train=is_train, reuse=reuse)
+        raise Exception("architecture '%s' not available" % self.config.architecture)
         
     def generator(self, z, y=None, is_train=True, reuse=False):
         if reuse:
@@ -536,7 +595,8 @@ class DCGAN(object):
     def load(self, checkpoint_dir):
         print(" [*] Reading checkpoints...")
 
-        model_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+        model_dir = "%s_%s_%s_%s_%s" % (self.dataset_name, self.config.architecture,
+            self.config.kernel, self.batch_size, self.output_size)
         checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)

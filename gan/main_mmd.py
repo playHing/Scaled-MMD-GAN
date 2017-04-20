@@ -23,12 +23,15 @@ flags.DEFINE_string("checkpoint_dir", "checkpoint_mmd", "Directory name to save 
 flags.DEFINE_string("sample_dir", "samples_mmd", "Directory name to save the image samples [samples_mmd]")
 flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image samples [logs_mmd]")
 flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
+flags.DEFINE_string("architecture", "dc", "The name of the architecture [dc, mlp]")
+flags.DEFINE_string("kernel", "rbf", "The name of the architecture [rbf, rq, di]")
+flags.DEFINE_boolean("dc_discriminator", False, "use deep convolutional discriminator [True]")
 flags.DEFINE_boolean("is_train", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("is_crop", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothing [False]")
 flags.DEFINE_boolean("use_kernel", False, "Use kernel loss [False]")
 flags.DEFINE_boolean("is_demo", False, "For testing [False]")
-flags.DEFINE_boolean("threads", np.inf, "Upper limit for number of threads [np.inf]")
+flags.DEFINE_integer("threads", np.inf, "Upper limit for number of threads [np.inf]")
 
 FLAGS = flags.FLAGS
 
