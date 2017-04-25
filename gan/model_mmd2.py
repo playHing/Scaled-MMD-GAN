@@ -7,7 +7,6 @@ import numpy as np
 import scipy.misc
 from six.moves import xrange
 import tensorflow as tf
-import matplotlib.pyplot as plt
 
 import mmd
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
@@ -39,8 +38,6 @@ class DCGAN(object):
         self.is_grayscale = (c_dim == 1)
         self.batch_size = batch_size
         self.sample_size = batch_size
-#        if self.config.dataset == 'GaussianMix':
-#            self.sample_size = min(16 * batch_size, 512)
         self.output_size = output_size
         self.sample_dir = sample_dir
         self.log_dir=log_dir
@@ -67,11 +64,6 @@ class DCGAN(object):
         self.g_bn3 = batch_norm(name='g_bn3')
 
         self.dataset_name = dataset_name
-        
-        discriminator_desc = '_dc' if self.config.dc_discriminator else ''
-        self.description = "%s_%s%s_%s_%s_%s" % (self.dataset_name, 
-                    self.config.architecture, discriminator_desc,
-                    self.config.kernel, self.batch_size, self.output_size)
         self.build_model()
 
 
@@ -114,10 +106,8 @@ class DCGAN(object):
             self.G = self.generator_mnist(self.z)
         elif 'lsun' in self.config.dataset:
             self.G = self.generator_lsun(self.z)
-        elif self.config.dataset == 'GaussianMix':
-            self.G = self.generator(self.z)
         else:
-            raise ValueError("not implemented dataset '%s'" % self.config.dataset)
+            raise Exception("not implemented dataset '%s'" % self.config.dataset)
         if self.config.dc_discriminator:
             images = self.discriminator(self.images, reuse=False)
             G = self.discriminator(self.G, reuse=True)
@@ -132,7 +122,7 @@ class DCGAN(object):
             alphas = [.1, .2, .5, 1.0, 2.0]
             self.kernel_loss = mmd.mix_rq_mmd2(G, images, alphas=alphas)
         elif self.config.kernel == 'di': # Distance - induced kernel
-            alphas = [1.0]
+            alphas = [.5, 1.0]
             di_r = np.random.choice(np.arange(self.batch_size))
             if self.config.dc_discriminator:
                 self.di_kernel_z = self.discriminator(
@@ -156,8 +146,6 @@ class DCGAN(object):
             self.sampler = self.generator_mnist(self.z, is_train=False, reuse=True)
         elif 'lsun' in self.config.dataset:
             self.sampler = self.generator_lsun(self.z, is_train=False, reuse=True)
-        elif self.config.dataset == 'GaussianMix':
-            self.sampler = self.generator(self.z, is_train=False, reuse=True)
         else:
             self.sampler = self.generator_any_set(self.z, is_train=False, reuse=True)
         t_vars = tf.trainable_variables()
@@ -173,11 +161,6 @@ class DCGAN(object):
             data_X, data_y = self.load_mnist()
         elif config.dataset == 'cifar10':
             data_X, data_y = self.load_cifar10()
-        elif (config.dataset == 'GaussianMix'):
-            data_X, ax1, wrtr = self.load_GaussianMix()
-            g_line = None
-            fig = ax1.figure
-            from IPython.display import display
         else:
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
         if self.config.use_kernel:
@@ -186,14 +169,16 @@ class DCGAN(object):
 
         self.sess.run(tf.global_variables_initializer())
         TrainSummary = tf.summary.merge_all()
-        log_dir = os.path.join(self.log_dir, self.description)
+        dataset_desc = "%s_%s_%s_%s_%s" % (self.dataset_name, self.config.architecture,
+            self.config.kernel, self.batch_size, self.output_size)
+        log_dir = os.path.join(self.log_dir, dataset_desc)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
 
         sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
 
-        if config.dataset in ['mnist', 'cifar10', 'GaussianMix']:
+        if (config.dataset == 'mnist') or (config.dataset == 'cifar10'):
             sample_images = data_X[0:self.sample_size]
             di_kernel_z_images = data_X[0: self.batch_size]
         else:
@@ -206,7 +191,7 @@ class DCGAN(object):
         else:
             print(" [!] Load failed...")
 
-        if config.dataset in ['mnist', 'cifar10', 'GaussianMix']:
+        if (config.dataset == 'mnist') or (config.dataset == 'cifar10'):
             batch_idxs = len(data_X) // config.batch_size
         else:
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
@@ -254,24 +239,15 @@ class DCGAN(object):
                 samples = self.sess.run(self.sampler, feed_dict={
                     self.z: sample_z, self.images: sample_images})
                 print(samples.shape)
-                sample_dir = os.path.join(self.sample_dir, self.description)
+                dataset_desc = "%s_%s_%s_%s_%s" % (self.dataset_name, 
+                    self.config.architecture, self.config.kernel, 
+                    self.batch_size, self.output_size
+                )
+                sample_dir = os.path.join(self.sample_dir, dataset_desc)
                 if not os.path.exists(sample_dir):
                     os.makedirs(sample_dir)
                 p = os.path.join(sample_dir, 'train_{:02d}.png'.format(it))
                 save_images(samples[:64, :, :, :], [8, 8], p)
-            if (config.dataset == 'GaussianMix') and np.mod(counter, 20) == 1:          
-                samples = self.sess.run(self.sampler, feed_dict={
-                    self.z: sample_z, self.images: sample_images})
-                if g_line is not None:
-                    g_line.remove()
-                g_line, = myhist(samples, ax=ax1, color='b')
-                plt.title("Iteration {: 6}:, loss {:7.4f}".format(
-                        counter, kernel_loss))
-                wrtr.grab_frame()
-                if counter % 100 == 0:
-                    display(fig)
-        if config.dataset == 'GaussianMix':
-            wrtr.finish()    
 
     def train_large(self, config):
         """Train DCGAN"""
@@ -281,7 +257,9 @@ class DCGAN(object):
 
         self.sess.run(tf.global_variables_initializer())
         TrainSummary = tf.summary.merge_all()
-        log_dir = os.path.join(self.log_dir, self.description)
+        dataset_desc = "%s_%s_%s_%s_%s" % (self.dataset_name, self.config.architecture,
+            self.config.kernel, self.batch_size, self.output_size)
+        log_dir = os.path.join(self.log_dir, dataset_desc)
         if not os.path.exists(log_dir):
             os.makedirs(log_dir)
         self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
@@ -335,7 +313,11 @@ class DCGAN(object):
                 samples = self.sess.run(self.sampler, feed_dict={
                     self.z: sample_z, self.images: sample_images})
                 print(samples.shape)
-                sample_dir = os.path.join(self.sample_dir, self.description)
+                dataset_desc = "%s_%s_%s_%s_%s" % (self.dataset_name, 
+                    self.config.architecture, self.config.kernel, 
+                    self.batch_size, self.output_size
+                )
+                sample_dir = os.path.join(self.sample_dir, dataset_desc)
                 if not os.path.exists(sample_dir):
                     os.makedirs(sample_dir)
                 p = os.path.join(sample_dir, 'train_{:02d}.png'.format(it))
@@ -375,7 +357,7 @@ class DCGAN(object):
                 scope.reuse_variables()
     
             s = self.output_size
-            if True: #np.mod(s, 16) == 0:
+            if np.mod(s, 16) == 0:
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
 #                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
 #                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
@@ -410,8 +392,6 @@ class DCGAN(object):
 
 
     def generator_cifar10(self, z, is_train=True, reuse=False):
-        if self.config.architecture == 'dc':
-            return self.generator(z, is_train=is_train, reuse=reuse)
         if reuse:
             tf.get_variable_scope().reuse_variables()
         h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
@@ -448,8 +428,8 @@ class DCGAN(object):
             tf.get_variable_scope().reuse_variables()
 
         s = self.output_size
-        if True: #np.mod(s, 16) == 0:
-            s2, s4, s8, s16 = max(1, int(s/2)), max(1, int(s/4)), max(1, int(s/8)), max(1, int(s/16))
+        if np.mod(s, 16) == 0:
+            s2, s4, s8, s16 = int(s/2), int(s/4), int(s/8), int(s/16)
 
             # project `z` and reshape
             self.z_, self.h0_w, self.h0_b = linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin', with_w=True)
@@ -599,37 +579,10 @@ class DCGAN(object):
         env.close()
 
         
-    def load_GaussianMix(self, means=[.0, 3.0], stds=[1.0, .5], size=1000):
-        from matplotlib import animation
-        import sys
-        X_real = np.r_[
-            np.random.normal(0,  1, size=size),
-            np.random.normal(3, .5, size=size),
-        ]   
-        X_real = X_real.reshape(X_real.shape[0], 1, 1, 1)
-        
-        xlo = -5
-        xhi = 7
-        
-        ax1 = plt.gca()
-        fig = ax1.figure
-        ax1.grid(False)
-        ax1.set_yticks([], [])
-        myhist(X_real.ravel(), color='r')
-        ax1.set_xlim(xlo, xhi)
-        ax1.set_ylim(0, 1.05)
-        ax1._autoscaleXon = ax1._autoscaleYon = False
-        
-        wrtr = animation.writers['ffmpeg'](fps=20)
-        sample_dir = os.path.join(self.sample_dir, self.description)
-        if not os.path.exists(sample_dir):
-            os.makedirs(sample_dir)
-        wrtr.setup(fig=fig, outfile=os.path.join(sample_dir, 'train.mp4'), dpi=100)
-        return X_real, ax1, wrtr
-            
     def save(self, checkpoint_dir, step):
         model_name = "DCGAN.model"
-        checkpoint_dir = os.path.join(checkpoint_dir, self.description)
+        model_dir = "%s_%s_%s" % (self.dataset_name, self.batch_size, self.output_size)
+        checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 
         if not os.path.exists(checkpoint_dir):
             os.makedirs(checkpoint_dir)
@@ -642,7 +595,9 @@ class DCGAN(object):
     def load(self, checkpoint_dir):
         print(" [*] Reading checkpoints...")
 
-        checkpoint_dir = os.path.join(checkpoint_dir, self.description)
+        model_dir = "%s_%s_%s_%s_%s" % (self.dataset_name, self.config.architecture,
+            self.config.kernel, self.batch_size, self.output_size)
+        checkpoint_dir = os.path.join(checkpoint_dir, model_dir)
 
         ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
         if ckpt and ckpt.model_checkpoint_path:
@@ -651,12 +606,3 @@ class DCGAN(object):
             return True
         else:
             return False
-        
-def myhist(X, ax=plt, bins='auto', **kwargs):
-    hist, bin_edges = np.histogram(X, bins=bins)
-    hist = hist / hist.max()
-    return ax.plot(
-        np.c_[bin_edges, bin_edges].ravel(),
-        np.r_[0, np.c_[hist, hist].ravel(), 0],
-        **kwargs
-    )

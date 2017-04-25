@@ -17,8 +17,8 @@ flags.DEFINE_integer("train_size", np.inf, "The size of train images [np.inf]")
 flags.DEFINE_integer("batch_size", 1000, "The size of batch images [1000]")
 flags.DEFINE_integer("output_size", 64, "The size of the output images to produce [64]")
 flags.DEFINE_integer("c_dim", 3, "Dimension of image color. [3]")
-flags.DEFINE_string("dataset", "mnist", "The name of dataset [celebA, mnist, lsun, cifar10]")
-flags.DEFINE_string("name", "mmd_test", "The name of dataset [celebA, mnist, lsun, cifar10]")
+flags.DEFINE_string("dataset", "mnist", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
+flags.DEFINE_string("name", "mmd_test", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
 flags.DEFINE_string("checkpoint_dir", "checkpoint_mmd", "Directory name to save the checkpoints [checkpoint_mmd]")
 flags.DEFINE_string("sample_dir", "samples_mmd", "Directory name to save the image samples [samples_mmd]")
 flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image samples [logs_mmd]")
@@ -62,6 +62,10 @@ def main(_):
                           sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         elif 'lsun' in FLAGS.dataset:
             dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
+                          dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
+                          sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
+        elif FLAGS.dataset == 'GaussianMix':
+            dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=1, c_dim=1, z_dim=5,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
                           sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         else:

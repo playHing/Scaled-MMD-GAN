@@ -91,7 +91,8 @@ def _mix_di_kernel(X, Y, z, alphas, wts=None):
 
     K_XX, K_XY, K_YY = 0, 0, 0
     for alpha, wt in zip(alphas, wts):
-        p = lambda x: tf.exp(alpha * tf.log(x))
+#        p = lambda x: tf.exp(alpha * tf.log(x))
+        p = lambda x: tf.pow(x, alpha)
         
         K_XX += wt * (p(d_Xz) + p(tf.transpose(d_Xz)) - p(c(X_sqnorms) + r(X_sqnorms) - 2 * XX))
         K_XY += wt * (p(d_Xz) + p(tf.transpose(d_Yz)) - p(c(X_sqnorms) + r(Y_sqnorms) - 2 * XY))
