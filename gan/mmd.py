@@ -129,6 +129,14 @@ def mix_rbf_mmd2_and_ratio(X, Y, sigmas=(1,), wts=None, biased=True):
     return _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
 
 
+def mix_rq_mmd2_and_ratio(X, Y, alphas=(1,), wts=None, biased=True):
+    K_XX, K_XY, K_YY, d = _mix_rq_kernel(X, Y, alphas, wts)
+    return _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
+
+
+def mix_di_mmd2_and_ratio(X, Y, z, alphas=(1,), wts=None, biased=True):
+    K_XX, K_XY, K_YY, d = _mix_di_kernel(X, Y, z, alphas, wts)
+    return _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
 ################################################################################
 ### Helper functions to compute variances based on kernel matrices
 

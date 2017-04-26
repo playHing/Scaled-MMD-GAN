@@ -2,7 +2,6 @@ import os
 import scipy.misc
 import numpy as np
 
-from model_mmd import DCGAN
 from utils import pp, visualize, to_json
 
 import tensorflow as tf
@@ -25,6 +24,7 @@ flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image sam
 flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
 flags.DEFINE_string("architecture", "dc", "The name of the architecture [dc, mlp]")
 flags.DEFINE_string("kernel", "rbf", "The name of the architecture [rbf, rq, di]")
+flags.DEFINE_string("model", "mmd", "The name of the kernel loss model [mmd, tmmd]")
 flags.DEFINE_boolean("dc_discriminator", False, "use deep convolutional discriminator [True]")
 flags.DEFINE_boolean("is_train", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("is_crop", False, "True for training, False for testing [False]")
@@ -51,25 +51,31 @@ def main(_):
         sess_config = tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)
     else:
         sess_config = tf.ConfigProto()
+        
+    if FLAGS.model == 'mmd':
+        from model_mmd import DCGAN as model
+    elif FLAGS.model == 'tmmd':
+        from model_tmmd import tmmd_DCGAN as model
+        
     with tf.Session(config=sess_config) as sess:
         if FLAGS.dataset == 'mnist':
-            dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
+            dcgan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
                           sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         elif FLAGS.dataset == 'cifar10':
-            dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
+            dcgan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
                           sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         elif 'lsun' in FLAGS.dataset:
-            dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
+            dcgan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
                           sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         elif FLAGS.dataset == 'GaussianMix':
-            dcgan = DCGAN(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=1, c_dim=1, z_dim=5,
+            dcgan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=1, c_dim=1, z_dim=5,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
                           sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         else:
-            dcgan = DCGAN(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, 
+            dcgan = model(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, 
                           output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, 
                           checkpoint_dir=FLAGS.checkpoint_dir, sample_dir=FLAGS.sample_dir,
