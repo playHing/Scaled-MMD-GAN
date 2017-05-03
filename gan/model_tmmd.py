@@ -5,7 +5,7 @@ from model_mmd import DCGAN, tf, np
 class tmmd_DCGAN(DCGAN):
     def __init__(self, sess, config, is_crop=True,
                  batch_size=64, output_size=64,
-                 z_dim=100, gf_dim=16, df_dim=16,
+                 z_dim=100, gf_dim=5, df_dim=7,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
         """

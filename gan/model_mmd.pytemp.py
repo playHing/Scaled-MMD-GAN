@@ -16,7 +16,7 @@ from utils import save_images, unpickle, read_and_scale, center_and_scale
 class DCGAN(object):
     def __init__(self, sess, config, is_crop=True,
                  batch_size=64, output_size=64,
-                 z_dim=100, gf_dim=5, df_dim=7,
+                 z_dim=100, gf_dim=4, df_dim=4,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, log_dir=None, 
                  data_dir=None, gradient_clip=1.0):
@@ -174,130 +174,6 @@ class DCGAN(object):
         self.optim_loss = self.kernel_loss
         self.optim_name = 'kernel loss'
 
-
-    def set_grads(self):
-        self.g_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
-        g_gvs = self.g_kernel_optim.compute_gradients(
-            loss=self.optim_loss, 
-            var_list=self.g_vars
-        )            
-        capped_g_gvs = [(tf.clip_by_value(g, -1., 1.), v) for g, v in g_gvs]
-        self.g_grads = self.g_kernel_optim.apply_gradients(
-            capped_g_gvs, 
-            global_step=self.global_step
-        )
-        if self.config.dc_discriminator:
-            self.d_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
-            d_gvs = self.d_kernel_optim.compute_gradients(
-                loss=self.optim_loss, 
-                var_list=self.d_vars
-            )
-            # negative gradients for maximization wrt discriminator
-            capped_d_gvs = [(-tf.clip_by_value(g, -1., 1.), v) for g, v in d_gvs]
-            self.d_grads = self.d_kernel_optim.apply_gradients(capped_d_gvs) 
-        else:
-            self.d_grads = None
-    
-
-    def save_samples(self, freq=500):
-        if np.mod(self.counter, freq) == 1:
-            self.save(self.checkpoint_dir, self.counter)
-            samples = self.sess.run(self.sampler, feed_dict={
-                self.z: self.sample_z, self.images: self.sample_images})
-            print(samples.shape)
-            sample_dir = os.path.join(self.sample_dir, self.description)
-            if not os.path.exists(sample_dir):
-                os.makedirs(sample_dir)
-            p = os.path.join(sample_dir, 'train_{:02d}.png'.format(self.counter))
-            save_images(samples[:64, :, :, :], [8, 8], p)        
-    
-    
-    def make_video(self, G_config, optim_loss):
-        if np.mod(self.counter, 20) == 1:          
-            samples = self.sess.run(self.sampler, feed_dict={
-                self.z: self.sample_z, self.images: self.sample_images})
-            if G_config['g_line'] is not None:
-                G_config['g_line'].remove()
-            G_config['g_line'], = myhist(samples, ax=G_config['ax1'], color='b')
-            plt.title("Iteration {: 6}:, loss {:7.4f}".format(
-                    self.counter, optim_loss))
-            G_config['writer'].grab_frame()
-            if self.counter % 100 == 0:
-                display(G_config['fig'])
-                
-    
-    def train_step(self, config, batch_images):
-        if (np.mod(self.counter, self.config.max_iteration//5) == 0):
-            self.current_lr *= self.config.decay_rate
-            print('current learning rate: %f' % self.current_lr)
-        batch_z = np.random.uniform(
-            -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
-
-        if self.config.use_kernel:
-            feed_dict = {self.lr: self.current_lr, self.images: batch_images,
-                         self.z: batch_z}
-            if self.config.kernel == 'di':
-                feed_dict.update({self.di_kernel_z_images: self.di_kernel_z_sample_images})
-            if self.config.is_demo:
-                summary_str, step, optim_loss = self.sess.run(
-                    [self.TrainSummary, self.global_step, self.optim_loss],
-                    feed_dict=feed_dict
-                )
-            else:
-                if self.d_counter == 0:
-                    _, summary_str, step, optim_loss = self.sess.run(
-                        [self.g_grads, self.TrainSummary, self.global_step,
-                         self.optim_loss], feed_dict=feed_dict
-                    )
-                else:
-    #                        (np.mod(counter//100, 5) == 4) and \
-    #                        (counter < self.config.max_iteration * 4/4):
-                    _, summary_str, step, optim_loss = self.sess.run(
-                        [self.d_grads, self.TrainSummary, self.global_step,
-                         self.optim_loss], feed_dict=feed_dict
-                    )     
-        if (np.mod(self.counter, 10) == 1) and (self.d_counter == 0):
-            self.writer.add_summary(summary_str, step)
-            print("Epoch: [%2d] time: %4.4f, %s: %.8f"
-                % (self.counter, time.time() - self.start_time, self.optim_name, optim_loss)) 
-        
-        if self.config.dc_discriminator:
-            d_steps = 0
-            if (self.counter < 25) or (self.counter % 100 == 0):
-                d_steps = 20
-            self.d_counter = (self.d_counter + 1) % (d_steps + 1)
-        self.counter += (self.d_counter == 0)
-        
-        return summary_str, step, optim_loss
-      
-
-    def train_init(self):
-        self.start_time = time.time()
-        
-        if self.config.use_kernel:
-            self.set_grads()
-
-        self.sess.run(tf.global_variables_initializer())
-        self.TrainSummary = tf.summary.merge_all()
-        
-        log_dir = os.path.join(self.log_dir, self.description)
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-            
-        self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
-
-        self.sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
-        
-        self.current_lr = self.config.learning_rate
-        
-        self.counter, self.d_counter = 1, 0
-        
-        if self.load(self.checkpoint_dir):
-            print(" [*] Load SUCCESS")
-        else:
-            print(" [!] Load failed...")
-        
-                      
     def train(self, config):
         """Train DCGAN"""
         if config.dataset == 'mnist':
@@ -305,62 +181,220 @@ class DCGAN(object):
         elif config.dataset == 'cifar10':
             data_X, data_y = self.load_cifar10()
         elif (config.dataset == 'GaussianMix'):
-            G_config = {'g_line': None}
-            data_X, G_config['ax1'], G_config['writer'] = self.load_GaussianMix()
-            G_config['fig'] = G_config['ax1'].figure
+            data_X, ax1, wrtr = self.load_GaussianMix()
+            g_line = None
+            fig = ax1.figure
             from IPython.display import display
         else:
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
-        
-        self.train_init()
+        if self.config.use_kernel:
+            g_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
+            g_gvs = g_kernel_optim.compute_gradients(
+                loss=self.optim_loss, 
+                var_list=self.g_vars
+            )            
+            capped_g_gvs = [(tf.clip_by_value(g, -1., 1.), v) for g, v in g_gvs]
+            g_apply_grads = g_kernel_optim.apply_gradients(
+                capped_g_gvs, 
+                global_step=self.global_step
+            )
+            if self.config.dc_discriminator:
+                d_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
+                d_gvs = d_kernel_optim.compute_gradients(
+                    loss=self.optim_loss, 
+                    var_list=self.d_vars
+                )
+                # negative gradients for maximization wrt discriminator
+                capped_d_gvs = [(-tf.clip_by_value(g, -1., 1.), v) for g, v in d_gvs]
+                d_apply_grads = d_kernel_optim.apply_gradients(capped_d_gvs)    
+
+        self.sess.run(tf.global_variables_initializer())
+        TrainSummary = tf.summary.merge_all()
+        log_dir = os.path.join(self.log_dir, self.description)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
+
+        sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
 
         if config.dataset in ['mnist', 'cifar10', 'GaussianMix']:
-            self.sample_images = data_X[0:self.sample_size]
-            self.di_kernel_z_sample_images = data_X[0: self.batch_size]
+            sample_images = data_X[0:self.sample_size]
+            di_kernel_z_images = data_X[0: self.batch_size]
         else:
            return
+        counter = 1
+        start_time = time.time()
+
+        if self.load(self.checkpoint_dir):
+            print(" [*] Load SUCCESS")
+        else:
+            print(" [!] Load failed...")
 
         if config.dataset in ['mnist', 'cifar10', 'GaussianMix']:
             batch_idxs = len(data_X) // config.batch_size
         else:
             data = glob(os.path.join("./data", config.dataset, "*.jpg"))
             batch_idxs = min(len(data), config.train_size) // config.batch_size
-        while self.counter < self.config.max_iteration:
-            if np.mod(self.counter, batch_idxs) == 1:
+        lr = self.config.learning_rate
+        for it in xrange(self.config.max_iteration):
+            if np.mod(it, batch_idxs) == 0:
                 perm = np.random.permutation(len(data_X))
-            idx = np.mod(self.counter, batch_idxs)
+            if (np.mod(it, self.config.max_iteration//5) == 0) and (it > 0):
+                lr = lr * self.config.decay_rate
+                print('current learning rate: %f' % lr)
+            idx = np.mod(it, batch_idxs)
             batch_images = data_X[perm[idx*config.batch_size:
                                        (idx+1)*config.batch_size]]
 
-            summary_str, step, optim_loss = self.train_step(config, batch_images)
-              
-            self.save_samples()
-            if config.dataset == 'GaussianMix':
-                self.make_video(G_config, optim_loss)
+            batch_z = np.random.uniform(
+                -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
+
+            if self.config.use_kernel:
+                feed_dict = {self.lr: lr, self.images: batch_images,
+                             self.z: batch_z}
+                if self.config.kernel == 'di':
+                    feed_dict.update({self.di_kernel_z_images: di_kernel_z_images})
+                if self.config.is_demo:
+                    summary_str, step, optim_loss = self.sess.run(
+                        [TrainSummary, self.global_step, self.optim_loss],
+                        feed_dict=feed_dict
+                    )
+                else:
+                    _, summary_str, step, optim_loss = self.sess.run(
+                        [g_apply_grads, TrainSummary, self.global_step,
+                         self.optim_loss], feed_dict=feed_dict
+                    )
+                    if self.config.dc_discriminator and \
+                        (np.mod(counter//100, 5) == 4) and \
+                        (counter < self.config.max_iteration * 4/4):
+                        _, summary_str, step, optim_loss = self.sess.run(
+                            [d_apply_grads, TrainSummary, self.global_step,
+                             self.optim_loss], feed_dict=feed_dict
+                        )                 
+
+            counter += 1
+            if np.mod(counter, 10) == 1:
+                self.writer.add_summary(summary_str, step)
+                print("Epoch: [%2d] time: %4.4f, %s: %.8f"
+                    % (it, time.time() - start_time, self.optim_name, optim_loss))
+#                print('D_VARS')
+#                for var in self.d_vars:
+#                    print(var.name, self.sess.run(var).mean())
+#                print('G_VARS')
+#                for var in self.g_vars:
+#                    print(var.name, self.sess.run(var).mean())                
+            if np.mod(counter, 500) == 1:
+                self.save(self.checkpoint_dir, counter)
+                samples = self.sess.run(self.sampler, feed_dict={
+                    self.z: sample_z, self.images: sample_images})
+                print(samples.shape)
+                sample_dir = os.path.join(self.sample_dir, self.description)
+                if not os.path.exists(sample_dir):
+                    os.makedirs(sample_dir)
+                p = os.path.join(sample_dir, 'train_{:02d}.png'.format(it))
+                save_images(samples[:64, :, :, :], [8, 8], p)
+            if (config.dataset == 'GaussianMix') and np.mod(counter, 20) == 1:          
+                samples = self.sess.run(self.sampler, feed_dict={
+                    self.z: sample_z, self.images: sample_images})
+                if g_line is not None:
+                    g_line.remove()
+                g_line, = myhist(samples, ax=ax1, color='b')
+                plt.title("Iteration {: 6}:, loss {:7.4f}".format(
+                        counter, optim_loss))
+                wrtr.grab_frame()
+                if counter % 100 == 0:
+                    display(fig)
         if config.dataset == 'GaussianMix':
-            G_config['writer'].finish()    
+            wrtr.finish()    
 
     def train_large(self, config):
         """Train DCGAN"""
-        self.train_init()
+        if self.config.use_kernel:
+            g_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
+            g_gvs = g_kernel_optim.compute_gradients(
+                loss=self.optim_loss, 
+                var_list=self.g_vars
+            )
+            capped_g_gvs = [(tf.clip_by_value(g, -1., 1.), v) for g, v in g_gvs]
+            g_apply_grads = g_kernel_optim.apply_gradients(capped_g_gvs, 
+                                                       global_step=self.global_step)
+            if self.config.dc_discriminator:
+                d_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
+                d_gvs = d_kernel_optim.compute_gradients(
+                    loss=self.optim_loss, 
+                    var_list=self.d_vars
+                )
+                # negative gradients for maximization wrt discriminator
+                capped_d_gvs = [(-tf.clip_by_value(g, -1., 1.), v) for g, v in d_gvs]
+                d_apply_grads = d_kernel_optim.apply_gradients(capped_d_gvs)             
+        self.sess.run(tf.global_variables_initializer())
+        TrainSummary = tf.summary.merge_all()
+        log_dir = os.path.join(self.log_dir, self.description)
+        if not os.path.exists(log_dir):
+            os.makedirs(log_dir)
+        self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
+
+        sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
 
         generator = self.gen_train_samples_from_lmdb()
         if 'lsun' in self.dataset_name:
             required_samples = int(np.ceil(self.sample_size/float(self.batch_size)))
             sampled = [next(generator) for _ in xrange(required_samples)]
-            self.sample_images = np.concatenate(sampled, axis=0)[: self.sample_size]
+            sample_images = np.concatenate(sampled, axis=0)[: self.sample_size]
             if self.config.kernel == 'di':
-                self.di_kernel_z_sample_images = next(generator)#sampled[0]
+                di_kernel_z_images = next(generator)#sampled[0]
         else:
            return
-        
-        while self.counter < self.config.max_iteration:
+        counter = 1
+        start_time = time.time()
+
+        if self.load(self.checkpoint_dir):
+            print(" [*] Load SUCCESS")
+        else:
+            print(" [!] Load failed...")
+        lr = self.config.learning_rate
+        di_r = np.random.choice(np.arange(self.sample_size))
+        for it in xrange(self.config.max_iteration):
+            if np.mod(it, 10000) == 1:
+                lr = lr * self.config.decay_rate
             batch_images = next(generator)
-            
-            summary_str, step, optim_loss = self.train_step(config, batch_images)
-            
-            self.save_samples()
-            
+            batch_z = np.random.uniform(
+                -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
+            if self.config.use_kernel:
+                feed_dict = {self.lr: lr, self.images: batch_images,
+                             self.z: batch_z}
+                if self.config.kernel == 'di':
+                    feed_dict.update({self.di_kernel_z_images: di_kernel_z_images})
+                if self.config.is_demo:
+                    summary_str, step, optim_loss = self.sess.run(
+                        [TrainSummary, self.global_step, self.optim_loss],
+                        feed_dict=feed_dict)
+                else:
+                    _, summary_str, step, optim_loss = self.sess.run(
+                        [g_apply_grads, TrainSummary, self.global_step,
+                         self.optim_loss], feed_dict=feed_dict)
+                    if self.config.dc_discriminator and \
+                            (np.mod(counter, 2) == 1) and \
+                            (counter < self.config.max_iteration * 3/4):
+                        _, summary_str, step, optim_loss = self.sess.run(
+                            [d_apply_grads, TrainSummary, self.global_step,
+                             self.optim_loss], feed_dict=feed_dict
+                        ) 
+            counter += 1
+            if np.mod(counter, 10) == 1:
+                self.writer.add_summary(summary_str, step)
+                print("Epoch: [%2d] time: %4.4f, %s: %.8f"
+                    % (it, time.time() - start_time, self.optim_name, optim_loss))
+            if np.mod(counter, 500) == 1:
+                self.save(self.checkpoint_dir, counter)
+                samples = self.sess.run(self.sampler, feed_dict={
+                    self.z: sample_z, self.images: sample_images})
+                print(samples.shape)
+                sample_dir = os.path.join(self.sample_dir, self.description)
+                if not os.path.exists(sample_dir):
+                    os.makedirs(sample_dir)
+                p = os.path.join(sample_dir, 'train_{:02d}.png'.format(it))
+                save_images(samples[:64, :, :, :], [8, 8], p)
                 
     def sampling(self, config):
         self.sess.run(tf.global_variables_initializer())

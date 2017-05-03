@@ -86,7 +86,7 @@ def conv_cond_concat(x, y):
 
 
 def conv2d(input_, output_dim,
-           k_h=3, k_w=3, d_h=2, d_w=2, stddev=0.02,
+           k_h=7, k_w=7, d_h=2, d_w=2, stddev=0.02,
            name="conv2d"):
     with tf.variable_scope(name):
         w = tf.get_variable('w', [k_h, k_w, input_.get_shape()[-1], output_dim],
@@ -100,7 +100,7 @@ def conv2d(input_, output_dim,
 
 
 def deconv2d(input_, output_shape,
-             k_h=3, k_w=3, d_h=2, d_w=2, stddev=0.02,
+             k_h=7, k_w=7, d_h=2, d_w=2, stddev=0.02,
              name="deconv2d", with_w=False):
     with tf.variable_scope(name):
         # filter : [height, width, output_channels, in_channels]

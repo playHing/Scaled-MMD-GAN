@@ -9,7 +9,7 @@ import tensorflow as tf
 flags = tf.app.flags
 flags.DEFINE_integer("max_iteration", 400000, "Epoch to train [400000]")
 flags.DEFINE_float("learning_rate", 2, "Learning rate [2]")
-flags.DEFINE_float("decay_rate", 1.0, "Decay rate [1.0]")
+flags.DEFINE_float("decay_rate", .5, "Decay rate [1.0]")
 flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
 flags.DEFINE_float("init", 0.02, "Initialization value [0.02]")
 flags.DEFINE_integer("train_size", np.inf, "The size of train images [np.inf]")
