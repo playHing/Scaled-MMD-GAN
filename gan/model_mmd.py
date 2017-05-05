@@ -212,8 +212,8 @@ class DCGAN(object):
             save_images(samples[:64, :, :, :], [8, 8], p)        
     
     
-    def make_video(self, G_config, optim_loss):
-        if np.mod(self.counter, 20) == 1:          
+    def make_video(self, G_config, optim_loss, freq=10):
+        if np.mod(self.counter, freq) == 1:          
             samples = self.sess.run(self.sampler, feed_dict={
                 self.z: self.sample_z, self.images: self.sample_images})
             if G_config['g_line'] is not None:
@@ -227,9 +227,6 @@ class DCGAN(object):
                 
     
     def train_step(self, config, batch_images):
-        if (np.mod(self.counter, self.config.max_iteration//5) == 0):
-            self.current_lr *= self.config.decay_rate
-            print('current learning rate: %f' % self.current_lr)
         batch_z = np.random.uniform(
             -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
 
@@ -256,15 +253,21 @@ class DCGAN(object):
                         [self.d_grads, self.TrainSummary, self.global_step,
                          self.optim_loss], feed_dict=feed_dict
                     )     
-        if (np.mod(self.counter, 10) == 1) and (self.d_counter == 0):
-            self.writer.add_summary(summary_str, step)
-            print("Epoch: [%2d] time: %4.4f, %s: %.8f"
-                % (self.counter, time.time() - self.start_time, self.optim_name, optim_loss)) 
-        
+        # G STEP
+        if self.d_counter == 0:
+            if (np.mod(self.counter, 10) == 1):
+                self.writer.add_summary(summary_str, step)
+                print("Epoch: [%2d] time: %4.4f, %s: %.8f"
+                    % (self.counter, time.time() - self.start_time, self.optim_name, optim_loss)) 
+            if (np.mod(self.counter, self.config.max_iteration//5) == 0):
+                self.current_lr *= self.config.decay_rate
+                print('current learning rate: %f' % self.current_lr)  
+                
         if self.config.dc_discriminator:
             d_steps = 0
-            if (self.counter < 25) or (self.counter % 100 == 0):
-                d_steps = 20
+            if (self.counter < 5) or ((self.counter % 1000 == 0) \
+                    and (self.counter < self.config.max_iteration*2/3)):
+                d_steps = 50
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         self.counter += (self.d_counter == 0)
         
@@ -404,9 +407,9 @@ class DCGAN(object):
                 h1 = lrelu(batch_norm(name='d_bn1')(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
                 h2 = lrelu(batch_norm(name='d_bn2')(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
                 h3 = lrelu(batch_norm(name='d_bn3')(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
-#                h4 = linear(tf.reshape(h3, [self.batch_size, -1]), 1, 'd_h3_lin')
-                return tf.reshape(h3, [self.batch_size, -1])
-#                return tf.nn.sigmoid(h4), h4
+                h4 = linear(tf.reshape(h3, [self.batch_size, -1]), self.df_dim*8, 'd_h3_lin')
+#                return tf.reshape(h3, [self.batch_size, -1])
+                return h4 #tf.nn.sigmoid(h4), h4
             else:
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
