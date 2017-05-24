@@ -1,11 +1,12 @@
 import mmd
 
 from model_mmd import DCGAN, tf, np
+from utils import variable_summaries
 
 class tmmd_DCGAN(DCGAN):
     def __init__(self, sess, config, is_crop=True,
                  batch_size=64, output_size=64,
-                 z_dim=100, gf_dim=5, df_dim=7,
+                 z_dim=100, gf_dim=64, df_dim=64,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
         """
@@ -30,12 +31,12 @@ class tmmd_DCGAN(DCGAN):
     def set_loss(self, G, images):
         if self.config.kernel == 'rbf': # Gaussian kernel
             bandwidths = [2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
-            self.kernel_loss, self.ratio_loss = mmd.mix_rbf_mmd2_and_ratio(
-                G, images, sigmas=bandwidths)
+            tmmd2 = lambda gg, ii: mmd.mix_rbf_mmd2_and_ratio(
+                gg, ii, sigmas=bandwidths)
         elif self.config.kernel == 'rq': # Rational quadratic kernel
             alphas = [.1, .2, .5, 1.0, 2.0]
-            self.kernel_loss, self.ratio_loss = mmd.mix_rq_mmd2_and_ratio(
-                G, images, alphas=alphas)
+            tmmd2 = lambda gg, ii: mmd.mix_rq_mmd2_and_ratio(
+                gg, ii, alphas=alphas)
         elif self.config.kernel == 'di': # Distance - induced kernel
             alphas = [1.0]
             di_r = np.random.choice(np.arange(self.batch_size))
@@ -44,13 +45,20 @@ class tmmd_DCGAN(DCGAN):
                         self.di_kernel_z_images, reuse=True)[di_r: di_r + 1]
             else:
                 self.di_kernel_z = tf.reshape(self.di_kernel_z_images[di_r: di_r + 1], [1, -1])
-            self.kernel_loss, self.ratio_loss = mmd.mix_di_mmd2_and_ratio(
-                    G, images, self.di_kernel_z, alphas=alphas)
+            tmmd2 = lambda gg, ii: mmd.mix_di_mmd2_and_ratio(
+                    gg, ii, self.di_kernel_z, alphas=alphas)
         else:
             raise Exception("Kernel '%s' not implemented for %s model" % 
                             (self.config.kernel, self.config.model))
-        tf.summary.scalar("kernel_loss", self.kernel_loss)
-        tf.summary.scalar("ratio_loss", self.ratio_loss)
-        self.kernel_loss = tf.sqrt(self.kernel_loss)
-        self.optim_loss = self.ratio_loss
-        self.optim_name = 'ratio loss'
+        
+        with tf.variable_scope('loss'):
+            self.kernel_loss, self.ratio_loss, self.var_est = tmmd2(G, images)
+            tf.summary.scalar("kernel_loss", self.kernel_loss)
+            tf.summary.scalar("ratio_loss", self.ratio_loss)
+            self.kernel_loss = tf.sqrt(self.kernel_loss)
+            self.optim_loss = self.ratio_loss
+            self.optim_name = 'ratio loss'
+            
+            variable_summaries([(self.var_est, 'variance_estimate')])
+            
+            self.add_gradient_penalty(lambda gg, ii: tmmd2(gg, ii)[1], G, images)      

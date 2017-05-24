@@ -169,7 +169,7 @@ def _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=False, biased=False,
     mmd2, var_est = _mmd2_and_variance(
         K_XX, K_XY, K_YY, const_diagonal=const_diagonal, biased=biased)
     ratio = mmd2 / tf.sqrt(tf.maximum(var_est, min_var_est))
-    return mmd2, ratio
+    return mmd2, ratio, var_est
 
 
 def _mmd2_and_variance(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):

@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 
 import mmd
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
-from utils import save_images, unpickle, read_and_scale, center_and_scale
+from utils import save_images, unpickle, read_and_scale, center_and_scale, variable_summaries
 
 class DCGAN(object):
     def __init__(self, sess, config, is_crop=True,
@@ -64,7 +64,10 @@ class DCGAN(object):
         self.g_bn1 = batch_norm(name='g_bn1')
         self.g_bn2 = batch_norm(name='g_bn2')
         self.g_bn3 = batch_norm(name='g_bn3')
-
+        self.d_bn0 = batch_norm(name='d_bn0')
+        self.d_bn1 = batch_norm(name='d_bn1')
+        self.d_bn2 = batch_norm(name='d_bn2')
+#        self.d_bn3 = batch_norm(name='d_bn3')
         self.dataset_name = dataset_name
         
         discriminator_desc = '_dc' if self.config.dc_discriminator else ''
@@ -153,10 +156,10 @@ class DCGAN(object):
     def set_loss(self, G, images):
         if self.config.kernel == 'rbf': # Gaussian kernel
             bandwidths = [2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
-            self.kernel_loss = mmd.mix_rbf_mmd2(G, images, sigmas=bandwidths)
+            mmd2 = lambda gg, ii: mmd.mix_rbf_mmd2(gg, ii, sigmas=bandwidths)
         elif self.config.kernel == 'rq': # Rational quadratic kernel
             alphas = [.1, .2, .5, 1.0, 2.0]
-            self.kernel_loss = mmd.mix_rq_mmd2(G, images, alphas=alphas)
+            mmd2 = lambda gg, ii: mmd.mix_rq_mmd2(gg, ii, alphas=alphas)
         elif self.config.kernel == 'di': # Distance - induced kernel
             alphas = [1.0]
             di_r = np.random.choice(np.arange(self.batch_size))
@@ -165,42 +168,69 @@ class DCGAN(object):
                         self.di_kernel_z_images, reuse=True)[di_r: di_r + 1]
             else:
                 self.di_kernel_z = tf.reshape(self.di_kernel_z_images[di_r: di_r + 1], [1, -1])
-            self.kernel_loss = mmd.mix_di_mmd2(G, images, self.di_kernel_z, 
-                                               alphas=alphas)
+            mmd2 = lambda gg, ii: mmd.mix_di_mmd2(gg, ii, self.di_kernel_z, 
+                                                  alphas=alphas)
         else:
             raise Exception("Kernel '%s' not implemented" % self.config.kernel)
-        tf.summary.scalar("kernel_loss", self.kernel_loss)
-        self.kernel_loss = tf.sqrt(self.kernel_loss)
-        self.optim_loss = self.kernel_loss
-        self.optim_name = 'kernel loss'
+        with tf.variable_scope('loss'):
+            self.kernel_loss = mmd2(G, images)
+            tf.summary.scalar("kernel_loss", self.kernel_loss)
+            self.kernel_loss = tf.sqrt(self.kernel_loss)
+            self.optim_loss = self.kernel_loss
+            self.optim_name = 'kernel_loss'
+            
+            self.add_gradient_penalty(mmd2, G, images)
+        
 
-
-    def set_grads(self):
-        self.g_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
-        g_gvs = self.g_kernel_optim.compute_gradients(
-            loss=self.optim_loss, 
-            var_list=self.g_vars
-        )            
-        capped_g_gvs = [(tf.clip_by_value(g, -1., 1.), v) for g, v in g_gvs]
-        self.g_grads = self.g_kernel_optim.apply_gradients(
-            capped_g_gvs, 
-            global_step=self.global_step
+    def add_gradient_penalty(self, loss_function, fake_data, real_data):
+        alpha = tf.random_uniform(
+            shape=[self.batch_size, 1], 
+            minval=0.,
+            maxval=1.
         )
-        if self.config.dc_discriminator:
-            self.d_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
-            d_gvs = self.d_kernel_optim.compute_gradients(
+        differences = fake_data - real_data
+        interpolates = real_data + (alpha*differences)
+        gradients = tf.gradients(loss_function(real_data, interpolates), [interpolates])[0]
+        slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1]))
+        penalty = tf.reduce_mean((slopes - 1.)**2)
+        if self.config.gradient_penalty > 0:
+            self.optim_loss += penalty * self.config.gradient_penalty
+            self.optim_name += ' gp %f' % self.config.gradient_penalty
+        variable_summaries([(self.optim_loss, self.optim_name),
+                            (gradients, 'dx_gradients')])
+    
+    def set_grads(self):
+        with tf.variable_scope("G_grads"):
+            self.g_kernel_optim = tf.train.MomentumOptimizer(self.lr, 0.9)
+            g_gvs = self.g_kernel_optim.compute_gradients(
                 loss=self.optim_loss, 
-                var_list=self.d_vars
-            )
-            # negative gradients for maximization wrt discriminator
-            capped_d_gvs = [(-tf.clip_by_value(g, -1., 1.), v) for g, v in d_gvs]
-            self.d_grads = self.d_kernel_optim.apply_gradients(capped_d_gvs) 
+                var_list=self.g_vars
+            )    
+            if self.config.gradient_penalty == 0:        
+                g_gvs = [(tf.clip_by_value(gg, -1., 1.), vv) for gg, vv in g_gvs]
+            variable_summaries([(gg, 'd.%s.' % vv.op.name[10:]) for gg, vv in g_gvs])
+            self.g_grads = self.g_kernel_optim.apply_gradients(
+                g_gvs, 
+                global_step=self.global_step
+            )       
+        if self.config.dc_discriminator:
+            with tf.variable_scope("D_grads"):
+                self.d_kernel_optim = tf.train.MomentumOptimizer(self.lr/1.0, 0.9)
+                d_gvs = self.d_kernel_optim.compute_gradients(
+                    loss=self.optim_loss, 
+                    var_list=self.d_vars
+                )
+                # negative gradients for maximization wrt discriminator
+                if self.config.gradient_penalty == 0:
+                    d_gvs = [(-tf.clip_by_value(gg, -1., 1.), vv) for gg, vv in d_gvs]
+                variable_summaries([(dd, 'd.%s.' % vv.op.name[14:]) for dd, vv in d_gvs])
+                self.d_grads = self.d_kernel_optim.apply_gradients(d_gvs) 
         else:
             self.d_grads = None
     
 
-    def save_samples(self, freq=500):
-        if np.mod(self.counter, freq) == 1:
+    def save_samples(self, freq=100):
+        if (np.mod(self.counter, freq) == 0) and (self.d_counter == 0):
             self.save(self.checkpoint_dir, self.counter)
             samples = self.sess.run(self.sampler, feed_dict={
                 self.z: self.sample_z, self.images: self.sample_images})
@@ -262,12 +292,14 @@ class DCGAN(object):
             if (np.mod(self.counter, self.config.max_iteration//5) == 0):
                 self.current_lr *= self.config.decay_rate
                 print('current learning rate: %f' % self.current_lr)  
-                
+            
+        if self.counter == 1:
+            print('current learning rate: %f' % self.current_lr)
         if self.config.dc_discriminator:
-            d_steps = 0
-            if (self.counter < 5) or ((self.counter % 1000 == 0) \
-                    and (self.counter < self.config.max_iteration*2/3)):
-                d_steps = 50
+            d_steps = 5
+            if (self.counter % 100 == 0) or (self.counter < 40):
+#                    and (self.counter < self.config.max_iteration*2/3)):
+                d_steps = 20 
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         self.counter += (self.d_counter == 0)
         
@@ -400,16 +432,30 @@ class DCGAN(object):
     
             s = self.output_size
             if True: #np.mod(s, 16) == 0:
-                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
+                h0 = image + lrelu(conv2d(image, self.c_dim, name='d_h0_conv', d_h=1, d_w=1))
+                h0 = self.d_bn0(h0, train=True)
+                h1 = h0 + lrelu(conv2d(h0, self.c_dim, name='d_h1_conv', d_h=1, d_w=1))
+                h1 = self.d_bn1(h1, train=True)
+                h2 = h1 + lrelu(conv2d(h1, self.c_dim, name='d_h2_conv', d_h=1, d_w=1))
+                h2 = self.d_bn2(h2, train=True)
+                h3 = h2 + lrelu(conv2d(h2, self.c_dim, name='d_h3_conv', d_h=1, d_w=1))
+                return tf.reshape(h3, [self.batch_size, -1])
+                
 #                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
 #                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
 #                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
-                h1 = lrelu(batch_norm(name='d_bn1')(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
-                h2 = lrelu(batch_norm(name='d_bn2')(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
-                h3 = lrelu(batch_norm(name='d_bn3')(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
-                h4 = linear(tf.reshape(h3, [self.batch_size, -1]), self.df_dim*8, 'd_h3_lin')
+#                if False: #self.config.gradient_penalty:
+#                    h1 = lrelu(conv2d(h0, self.df_dim*2, name='d_h1_conv'))
+#                    h2 = lrelu(conv2d(h1, self.df_dim*4, name='d_h2_conv'))
+#                    h3 = lrelu(conv2d(h2, self.df_dim*8, name='d_h3_conv'))
+#                else:
+#                    h1 = lrelu(batch_norm(name='d_bn1')(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
+#                    h2 = lrelu(batch_norm(name='d_bn2')(conv2d(h1, self.df_dim*4, name='d_h2_conv')))
+#                    h3 = lrelu(batch_norm(name='d_bn3')(conv2d(h2, self.df_dim*8, name='d_h3_conv')))
+#                h4 = linear(tf.reshape(h3, [self.batch_size, -1]), self.df_dim*8, 'd_h3_lin')
 #                return tf.reshape(h3, [self.batch_size, -1])
-                return h4 #tf.nn.sigmoid(h4), h4
+                
+#                return h4 #tf.nn.sigmoid(h4), h4
             else:
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim*2, name='d_h1_conv')))
@@ -422,43 +468,46 @@ class DCGAN(object):
 
 
     def generator_mnist(self, z, is_train=True, reuse=False):
-        if reuse:
-            tf.get_variable_scope().reuse_variables()
-        h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
-        h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
-        h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
-        h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
-        h4 = linear(tf.nn.relu(h3), 28 * 28 * 1, 'g_h4_lin', stddev=self.config.init)
-
-        return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, 28, 28, 1])
+        with tf.variable_scope('generator') as scope:
+            if reuse:
+                scope.reuse_variables()
+            h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
+            h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
+            h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
+            h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
+            h4 = linear(tf.nn.relu(h3), 28 * 28 * 1, 'g_h4_lin', stddev=self.config.init)
+    
+            return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, 28, 28, 1])
 
 
     def generator_cifar10(self, z, is_train=True, reuse=False):
         if self.config.architecture == 'dc':
             return self.generator(z, is_train=is_train, reuse=reuse)
-        if reuse:
-            tf.get_variable_scope().reuse_variables()
-        h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
-        h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
-        h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
-        h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
-        h4 = linear(tf.nn.relu(h3), 32 * 32 * 3, 'g_h4_lin', stddev=self.config.init)
-
-        return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, 32, 32, 3]) 
+        with tf.variable_scope('generator') as scope:
+            if reuse:
+                scope.reuse_variables()
+            h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
+            h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
+            h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
+            h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
+            h4 = linear(tf.nn.relu(h3), 32 * 32 * 3, 'g_h4_lin', stddev=self.config.init)
+    
+            return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, 32, 32, 3]) 
 
 
     def generator_any_set(self, z, is_train=True, reuse=False):
-        if reuse:
-            tf.get_variable_scope().reuse_variables()
-        h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
-        h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
-        h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
-        h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
-        h4 = linear(tf.nn.relu(h3), self.output_size**2 * self.c_dim, 
-                    'g_h4_lin', stddev=self.config.init)
-
-        return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, self.output_size, 
-                                              self.output_size, self.c_dim])
+        with tf.variable_scope('generator') as scope:
+            if reuse:
+                scope.reuse_variables()
+            h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
+            h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
+            h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
+            h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
+            h4 = linear(tf.nn.relu(h3), self.output_size**2 * self.c_dim, 
+                        'g_h4_lin', stddev=self.config.init)
+    
+            return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, self.output_size, 
+                                                  self.output_size, self.c_dim])
         
     def generator_lsun(self, z, is_train=True, reuse=False):
         if self.config.architecture == 'dc':
@@ -468,50 +517,64 @@ class DCGAN(object):
         raise Exception("architecture '%s' not available" % self.config.architecture)
         
     def generator(self, z, y=None, is_train=True, reuse=False):
-        if reuse:
-            tf.get_variable_scope().reuse_variables()
-
-        s = self.output_size
-        if True: #np.mod(s, 16) == 0:
-            s2, s4, s8, s16 = max(1, int(s/2)), max(1, int(s/4)), max(1, int(s/8)), max(1, int(s/16))
-
-            # project `z` and reshape
-            self.z_, self.h0_w, self.h0_b = linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin', with_w=True)
-
-            self.h0 = tf.reshape(self.z_, [-1, s16, s16, self.gf_dim * 8])
-            h0 = lrelu(self.g_bn0(self.h0, train=is_train))
-
-            self.h1, self.h1_w, self.h1_b = deconv2d(h0,
-                [self.batch_size, s8, s8, self.gf_dim*4], name='g_h1', with_w=True)
-            h1 = lrelu(self.g_bn1(self.h1, train=is_train))
-
-            h2, self.h2_w, self.h2_b = deconv2d(h1,
-                [self.batch_size, s4, s4, self.gf_dim*2], name='g_h2', with_w=True)
-            h2 = lrelu(self.g_bn2(h2, train=is_train))
-
-            h3, self.h3_w, self.h3_b = deconv2d(h2,
-                [self.batch_size, s2, s2, self.gf_dim*1], name='g_h3', with_w=True)
-            h3 = lrelu(self.g_bn3(h3, train=is_train))
-
-            h4, self.h4_w, self.h4_b = deconv2d(h3,
-                [self.batch_size, s, s, self.c_dim], name='g_h4', with_w=True)
-            return h4
-        else:
+        with tf.variable_scope('generator') as scope:
+            if reuse:
+                scope.reuse_variables()
             s = self.output_size
-            s2, s4 = int(s/2), int(s/4)
-            self.z_, self.h0_w, self.h0_b = linear(z, self.gf_dim*2*s4*s4, 'g_h0_lin', with_w=True)
-
-            self.h0 = tf.reshape(self.z_, [-1, s4, s4, self.gf_dim * 2])
-            h0 = lrelu(self.g_bn0(self.h0, train=is_train))
-
-            self.h1, self.h1_w, self.h1_b = deconv2d(h0,
-                [self.batch_size, s2, s2, self.gf_dim*1], name='g_h1', with_w=True)
-            h1 = lrelu(self.g_bn1(self.h1, train=is_train))
-
-            h2, self.h2_w, self.h2_b = deconv2d(h1,
-                [self.batch_size, s, s, self.c_dim], name='g_h2', with_w=True)
-
-            return h2
+            if True: #np.mod(s, 16) == 0:
+                s2, s4, s8, s16 = max(1, int(s/2)), max(1, int(s/4)), max(1, int(s/8)), max(1, int(s/16))
+    
+                # project `z` and reshape
+                self.z_, self.h0_w, self.h0_b = linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin', with_w=True)
+    
+                h0 = tf.reshape(self.z_, [-1, s16, s16, self.gf_dim * 8])
+#                self.g_bn0(h0, train=is_train)
+                h0 = lrelu(h0)
+    
+                h1, self.h1_w, self.h1_b = deconv2d(h0,
+                    [self.batch_size, s8, s8, self.gf_dim*4], name='g_h1', with_w=True)
+                h1 = self.g_bn1(h1, train=is_train)
+                h1 = lrelu(h1)
+                
+                h2, self.h2_w, self.h2_b = deconv2d(h1,
+                    [self.batch_size, s4, s4, self.gf_dim*2], name='g_h2', with_w=True)
+                h2 = self.g_bn2(h2, train=is_train)
+                h2 = lrelu(h2)
+    
+                h3, self.h3_w, self.h3_b = deconv2d(h2,
+                    [self.batch_size, s2, s2, self.gf_dim*1], name='g_h3', with_w=True)
+                h3 = self.g_bn3(h3, train=is_train)
+                h3 = lrelu(h3)
+    
+                h4, self.h4_w, self.h4_b = deconv2d(h3,
+                    [self.batch_size, s, s, self.c_dim], name='g_h4', with_w=True)
+                
+                with tf.name_scope('G_outputs'):
+                    variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'), 
+                                        (h3, 'h3'), (h4, 'h4')])
+    #            variable_summaries([(h1_w, 'h0lin_w'), (h1_b, 'h0lin_b'), 
+    #                                (h1_w, 'h1_w'), (h1_b, 'h1_b'), 
+    #                                (h2_w, 'h2_w'), (h2_b, 'h2_b'),
+    #                                (h3_w, 'h3_w'), (h3_b, 'h3_b'),
+    #                                (h4_w, 'h4_w'), (h4_b, 'h4_b')])
+                
+                return h4
+            else:
+                s = self.output_size
+                s2, s4 = int(s/2), int(s/4)
+                self.z_, self.h0_w, self.h0_b = linear(z, self.gf_dim*2*s4*s4, 'g_h0_lin', with_w=True)
+    
+                self.h0 = tf.reshape(self.z_, [-1, s4, s4, self.gf_dim * 2])
+                h0 = lrelu(self.g_bn0(self.h0, train=is_train))
+    
+                self.h1, self.h1_w, self.h1_b = deconv2d(h0,
+                    [self.batch_size, s2, s2, self.gf_dim*1], name='g_h1', with_w=True)
+                h1 = lrelu(self.g_bn1(self.h1, train=is_train))
+    
+                h2, self.h2_w, self.h2_b = deconv2d(h1,
+                    [self.batch_size, s, s, self.c_dim], name='g_h2', with_w=True)
+    
+                return h2
 
 
     def load_mnist(self):

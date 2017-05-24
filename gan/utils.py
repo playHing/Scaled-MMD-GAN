@@ -9,6 +9,7 @@ import pprint
 import scipy.misc
 import numpy as np
 from time import gmtime, strftime
+import tensorflow as tf
 
 from six.moves import xrange
 
@@ -219,3 +220,21 @@ def read_and_scale(file, size=64):
     from PIL import Image
     im = Image.open(file)
     return center_and_scale(im, size=size)
+    
+    
+def variable_summary(var, name):
+    """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
+#    with tf.get_variable_scope():
+    if var is None:
+        print("Variable Summary: None value for variable '%s'" % name)
+        return
+    mean = tf.reduce_mean(var)
+    with tf.name_scope('stddev'):
+        stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
+    tf.summary.scalar(name + '_stddev', stddev)
+    tf.summary.scalar(name + '_norm', tf.sqrt(tf.reduce_mean(tf.square(var))))
+    tf.summary.histogram(name + '_histogram', var)    
+        
+def variable_summaries(vars_and_names):
+    for vn in vars_and_names:
+        variable_summary(vn[0], vn[1])        
