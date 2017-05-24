@@ -7,7 +7,17 @@ else
     is_train=True
 fi
 
-CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0} python main_tmmd.py \
-    --use_kernel --is_train=$is_train \
-    --name=tmmd_lr0.02_decay0.5_init0.1_b500_iter50000_onekernel_nolog \
-    --max_iteration=50000 --init=0.1 --learning_rate=0.02 --batch_size=500
+python main_mmd.py \
+    --model=tmmd \
+    --use_kernel --is_train=True \
+    --name=tmmd\
+    --max_iteration=20000 --init=0.1 --learning_rate=.00098 --batch_size=128 \
+    --dataset=cifar10 --architecture=dc --dc_discriminator --kernel=rq \
+##    --gradient_penalty=10.0
+
+##python main_mmd.py \
+##    --model=tmmd \
+##    --use_kernel --is_train=True \
+##    --name=tmmd\
+##    --max_iteration=20000 --init=0.1 --learning_rate=.00095 --batch_size=512 \
+##    --dataset=cifar10 --architecture=mlp --dc_discriminator --kernel=rq \
