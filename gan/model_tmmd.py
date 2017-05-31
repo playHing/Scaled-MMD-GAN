@@ -6,7 +6,7 @@ from utils import variable_summaries
 class tmmd_DCGAN(DCGAN):
     def __init__(self, sess, config, is_crop=True,
                  batch_size=64, output_size=64,
-                 z_dim=100, gf_dim=64, df_dim=64,
+                 z_dim=100, gf_dim=16, df_dim=16,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
         """
@@ -34,10 +34,15 @@ class tmmd_DCGAN(DCGAN):
             tmmd2 = lambda gg, ii: mmd.mix_rbf_mmd2_and_ratio(
                 gg, ii, sigmas=bandwidths)
         elif self.config.kernel == 'rq': # Rational quadratic kernel
-            alphas = [.1, .2, .5, 1.0, 2.0]
+            alphas = [.001, .01, .1, 1.0, 10.0]
             tmmd2 = lambda gg, ii: mmd.mix_rq_mmd2_and_ratio(
                 gg, ii, alphas=alphas)
         elif self.config.kernel == 'di': # Distance - induced kernel
+            self.di_kernel_z_images = tf.placeholder(
+                tf.float32, 
+                [self.batch_size, self.output_size, self.output_size, self.c_dim],
+                name='di_kernel_z_images'
+            )
             alphas = [1.0]
             di_r = np.random.choice(np.arange(self.batch_size))
             if self.config.dc_discriminator:

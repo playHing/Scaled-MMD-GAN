@@ -13,7 +13,7 @@ _eps=1e-8
 ################################################################################
 ### Quadratic-time MMD with Gaussian RBF kernel
 
-def _mix_rbf_kernel(X, Y, sigmas, wts=None):
+def _mix_rbf_kernel(X, Y, sigmas, wts=None, K_XY_only=False):
     if wts is None:
         wts = [1] * len(sigmas)
 
@@ -30,14 +30,20 @@ def _mix_rbf_kernel(X, Y, sigmas, wts=None):
     K_XX, K_XY, K_YY = 0, 0, 0
     for sigma, wt in zip(sigmas, wts):
         gamma = 1 / (2 * sigma**2)
-        K_XX += wt * tf.exp(-gamma * (-2 * XX + c(X_sqnorms) + r(X_sqnorms)))
         K_XY += wt * tf.exp(-gamma * (-2 * XY + c(X_sqnorms) + r(Y_sqnorms)))
+    
+    if K_XY_only:
+        return K_XY
+    
+    for sigma, wt in zip(sigmas, wts):
+        gamma = 1 / (2 * sigma**2)
+        K_XX += wt * tf.exp(-gamma * (-2 * XX + c(X_sqnorms) + r(X_sqnorms)))
         K_YY += wt * tf.exp(-gamma * (-2 * YY + c(Y_sqnorms) + r(Y_sqnorms)))
 
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
 
 
-def _mix_rq_kernel(X, Y, alphas=[1], wts=None):
+def _mix_rq_kernel(X, Y, alphas=[1], wts=None, K_XY_only=False):
     """
     Rational quadratic kernel
     http://www.cs.toronto.edu/~duvenaud/cookbook/index.html
@@ -56,10 +62,16 @@ def _mix_rq_kernel(X, Y, alphas=[1], wts=None):
     c = lambda x: tf.expand_dims(x, 1)
 
     K_XX, K_XY, K_YY = 0, 0, 0
+    
     for alpha, wt in zip(alphas, wts):
-        K_XX += wt * tf.exp(-alpha * tf.log(1 + (-2 * XX + c(X_sqnorms) + r(X_sqnorms))/alpha))
-        K_XY += wt * tf.exp(-alpha * tf.log(1 + (-2 * XY + c(X_sqnorms) + r(Y_sqnorms))/alpha))
-        K_YY += wt * tf.exp(-alpha * tf.log(1 + (-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))/alpha))
+        K_XY += wt * tf.exp(-alpha * tf.log(1 + (-2 * XY + c(X_sqnorms) + r(Y_sqnorms))/(2*alpha)))
+        
+    if K_XY_only:
+        return K_XY
+    
+    for alpha, wt in zip(alphas, wts):
+        K_XX += wt * tf.exp(-alpha * tf.log(1 + (-2 * XX + c(X_sqnorms) + r(X_sqnorms))/(2*alpha)))
+        K_YY += wt * tf.exp(-alpha * tf.log(1 + (-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))/(2*alpha)))
 
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
 

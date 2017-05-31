@@ -13,10 +13,10 @@ flags.DEFINE_float("decay_rate", .5, "Decay rate [1.0]")
 flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
 flags.DEFINE_float("init", 0.02, "Initialization value [0.02]")
 flags.DEFINE_integer("train_size", np.inf, "The size of train images [np.inf]")
-flags.DEFINE_integer("batch_size", 1000, "The size of batch images [1000]")
+flags.DEFINE_integer("batch_size", 128, "The size of batch images [1000]")
 flags.DEFINE_integer("output_size", 64, "The size of the output images to produce [64]")
 flags.DEFINE_integer("c_dim", 3, "Dimension of image color. [3]")
-flags.DEFINE_string("dataset", "mnist", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
+flags.DEFINE_string("dataset", "cifar10", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
 flags.DEFINE_string("name", "mmd_test", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
 flags.DEFINE_string("checkpoint_dir", "checkpoint_mmd", "Directory name to save the checkpoints [checkpoint_mmd]")
 flags.DEFINE_string("sample_dir", "samples_mmd", "Directory name to save the image samples [samples_mmd]")
@@ -24,7 +24,7 @@ flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image sam
 flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
 flags.DEFINE_string("architecture", "dc", "The name of the architecture [dc, mlp]")
 flags.DEFINE_string("kernel", "rbf", "The name of the architecture [rbf, rq, di]")
-flags.DEFINE_string("model", "mmd", "The name of the kernel loss model [mmd, tmmd]")
+flags.DEFINE_string("model", "mmd", "The name of the kernel loss model [mmd, tmmd, me]")
 flags.DEFINE_boolean("dc_discriminator", False, "use deep convolutional discriminator [True]")
 flags.DEFINE_boolean("is_train", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("is_crop", False, "True for training, False for testing [False]")
@@ -57,6 +57,8 @@ def main(_):
         from model_mmd import DCGAN as model
     elif FLAGS.model == 'tmmd':
         from model_tmmd import tmmd_DCGAN as model
+    elif FLAGS.model == 'me':
+        from model_me import me_DCGAN as model
         
     with tf.Session(config=sess_config) as sess:
         if FLAGS.dataset == 'mnist':
