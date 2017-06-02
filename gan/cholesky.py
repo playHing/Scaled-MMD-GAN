@@ -115,7 +115,8 @@ def me_loss(X, Y, d, batch_size, with_inv=True):
     S = tf.matmul(Z_, tf.transpose(Z_))
     S = S / np.float(batch_size - 1) + eps * tf.diag(tf.ones(d))
     
-    L = cholesky_unblocked(S)
+#    L = cholesky_unblocked(S)
+    L = tf.cholesky(S)
 #    return Z, Z_, S, L
     I = tf.Variable(tf.diag(tf.ones(d)))
     Linv = tf.matrix_triangular_solve(L , I)
@@ -124,9 +125,25 @@ def me_loss(X, Y, d, batch_size, with_inv=True):
     lambda_n = tf.matmul(tf.matmul(tf.transpose(muZ), Sinv), muZ) * batch_size
     
     return lambda_n[0][0]
-    
-
-
+#    
+#N = 1000
+#import time
+#a = tf.get_variable('a', [N, N], tf.float32)
+#b = tf.get_variable('b', [N, N], tf.float32)    
+#
+#c = cholesky_unblocked(a)
+#d = tf.cholesky(b)
+#
+#with tf.Session() as sess:
+#    sess.run(tf.global_variables_initializer())
+#    x = np.random.rand(N, N)
+#    x = np.dot(x, x.transpose()) + np.eye(N) * .0001
+#    t = time.time()
+#    C = sess.run(c, feed_dict={a:x})
+#    print(time.time() - t)
+#    t = time.time()
+#    D = sess.run(d, feed_dict={b:x})
+#    print(time.time() - t)
     
 
 #a = tf.get_variable('a', [3,50], tf.float32)

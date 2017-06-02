@@ -34,7 +34,7 @@ class me_DCGAN(DCGAN):
         if self.config.kernel == '':
             me = lambda gg, ii: me_loss(
                 gg, ii, self.df_dim, self.batch_size,
-                with_inv=(self.config.gradient_penalty == 0)
+                with_inv=True#(self.config.gradient_penalty == 0)
             )
             self.optim_name = 'mean embedding loss'
         else:
@@ -73,7 +73,7 @@ class me_DCGAN(DCGAN):
             self.optim_loss = me(G, images)
             tf.summary.scalar(self.optim_name, self.optim_loss)
 
-#            self.add_gradient_penalty(me, G, images)      
+            self.add_gradient_penalty(me, G, images)      
 
     def discriminator(self, image, y=None, reuse=False):
         with tf.variable_scope("discriminator") as scope:
@@ -148,9 +148,9 @@ class me_DCGAN(DCGAN):
         if self.counter == 1:
             print('current learning rate: %f' % self.current_lr)
         if self.config.dc_discriminator:
-            d_steps = 0
-            if (self.counter % 10 == 0) and (self.counter > 0):
-                d_steps = 1
+            d_steps = 2
+            if (self.counter % 100 == 0) or (self.counter < 20):
+                d_steps = 100
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         self.counter += (self.d_counter == 0)
         

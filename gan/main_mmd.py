@@ -32,6 +32,7 @@ flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothin
 flags.DEFINE_boolean("use_kernel", False, "Use kernel loss [False]")
 flags.DEFINE_boolean("is_demo", False, "For testing [False]")
 flags.DEFINE_float("gradient_penalty", 0.0, "Use gradient penalty [0.0]")
+flags.DEFINE_float("discriminator_weight_clip", 0.0, "Use discriminator weight clip [0.0]")
 flags.DEFINE_integer("threads", np.inf, "Upper limit for number of threads [np.inf]")
 
 FLAGS = flags.FLAGS

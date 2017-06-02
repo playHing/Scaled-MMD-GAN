@@ -6,7 +6,7 @@ from utils import variable_summaries
 class tmmd_DCGAN(DCGAN):
     def __init__(self, sess, config, is_crop=True,
                  batch_size=64, output_size=64,
-                 z_dim=100, gf_dim=16, df_dim=16,
+                 z_dim=100, gf_dim=64, df_dim=16,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
         """
@@ -30,7 +30,7 @@ class tmmd_DCGAN(DCGAN):
 
     def set_loss(self, G, images):
         if self.config.kernel == 'rbf': # Gaussian kernel
-            bandwidths = [2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
+            bandwidths = [1., 2., 4., 8. ,16.]
             tmmd2 = lambda gg, ii: mmd.mix_rbf_mmd2_and_ratio(
                 gg, ii, sigmas=bandwidths)
         elif self.config.kernel == 'rq': # Rational quadratic kernel
@@ -64,6 +64,7 @@ class tmmd_DCGAN(DCGAN):
             self.optim_loss = self.ratio_loss
             self.optim_name = 'ratio loss'
             
-            variable_summaries([(self.var_est, 'variance_estimate')])
+#            variable_summaries([(tf.clip_by_value(self.var_est, 0, 100000.0), 
+#                                 'variance_estimate')])
             
             self.add_gradient_penalty(lambda gg, ii: tmmd2(gg, ii)[1], G, images)      
