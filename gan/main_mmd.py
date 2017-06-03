@@ -34,6 +34,9 @@ flags.DEFINE_boolean("is_demo", False, "For testing [False]")
 flags.DEFINE_float("gradient_penalty", 0.0, "Use gradient penalty [0.0]")
 flags.DEFINE_float("discriminator_weight_clip", 0.0, "Use discriminator weight clip [0.0]")
 flags.DEFINE_integer("threads", np.inf, "Upper limit for number of threads [np.inf]")
+flags.DEFINE_integer("dsteps", 1, "Number of discrimintor steps per one generator step" [1])
+flags.DEFINE_integer("start_dsteps", 1, "Number of discrimintor steps per one generator step during first 20 steps and every 100th step" [1])
+
 
 FLAGS = flags.FLAGS
 

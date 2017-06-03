@@ -148,9 +148,9 @@ class me_DCGAN(DCGAN):
         if self.counter == 1:
             print('current learning rate: %f' % self.current_lr)
         if self.config.dc_discriminator:
-            d_steps = 2
-            if (self.counter % 100 == 0) or (self.counter < 20):
-                d_steps = 100
+            d_steps = self.config.dsteps
+            if ((self.counter % 100 == 0) or (self.counter < 20)):
+                d_steps = self.config.start_dsteps
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         self.counter += (self.d_counter == 0)
         
