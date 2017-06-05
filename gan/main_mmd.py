@@ -61,7 +61,7 @@ def main(_):
         from model_mmd import DCGAN as model
     elif FLAGS.model == 'tmmd':
         from model_tmmd import tmmd_DCGAN as model
-    elif FLAGS.model == 'me':
+    elif (FLAGS.model == 'me') or (FLAGS.model == 'optme'):
         from model_me import me_DCGAN as model
         
     with tf.Session(config=sess_config) as sess:

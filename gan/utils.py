@@ -238,3 +238,9 @@ def variable_summary(var, name):
 def variable_summaries(vars_and_names):
     for vn in vars_and_names:
         variable_summary(vn[0], vn[1])        
+        
+def conv_sizes(size, layers, stride=2):
+    s = [int(size)]
+    for l in range(layers):
+        s.append(int(np.ceil(float(s[-1])/float(stride))))
+    return tuple(s)

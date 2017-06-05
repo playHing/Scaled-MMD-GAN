@@ -4,12 +4,14 @@ from model_mmd import DCGAN, tf, np
 from utils import variable_summaries
 from cholesky import me_loss
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
+from glob import glob
+import os
 import time
 
 class me_DCGAN(DCGAN):
     def __init__(self, sess, config, is_crop=True,
                  batch_size=64, output_size=64,
-                 z_dim=100, gf_dim=8, df_dim=32,
+                 z_dim=100, gf_dim=8, df_dim=16,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
         """
@@ -24,12 +26,27 @@ class me_DCGAN(DCGAN):
             dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
+        self.asi = [np.zeros([batch_size, output_size, output_size, c_dim])]
         super(me_DCGAN, self).__init__(sess=sess, config=config, is_crop=is_crop,
              batch_size=batch_size, output_size=output_size, z_dim=z_dim, 
              gf_dim=gf_dim, df_dim=df_dim, gfc_dim=gfc_dim, dfc_dim=dfc_dim, 
              c_dim=c_dim, dataset_name=dataset_name, checkpoint_dir=checkpoint_dir,
              sample_dir=sample_dir, log_dir=log_dir, data_dir=data_dir)
-
+        
+    def test_location_initializer(self):
+        if 'lsun' in self.config.dataset:
+            generator = self.gen_train_samples_from_lmdb()
+            return tf.constant(next(generator), dtype=tf.float32)
+        if self.config.dataset == 'mnist':
+            data_X, data_y = self.load_mnist()
+        elif self.config.dataset == 'cifar10':
+            data_X, data_y = self.load_cifar10()
+        elif (self.config.dataset == 'GaussianMix'):
+            data_X, _, __ = self.load_GaussianMix()
+        else:
+            data_X = glob(os.path.join("./data", self.config.dataset, "*.jpg"))
+        return tf.constant(data_X[:self.batch_size], dtype=tf.float32)
+        
     def set_loss(self, G, images):
         if self.config.kernel == '':
             me = lambda gg, ii: me_loss(
@@ -38,12 +55,24 @@ class me_DCGAN(DCGAN):
             )
             self.optim_name = 'mean embedding loss'
         else:
-            self.me_test_images = tf.placeholder(
-                tf.float32, 
-                [self.batch_size, self.output_size, self.output_size, self.c_dim],
-                name='me_test_locations'
-            )
             im_id = tf.constant(np.random.choice(np.arange(self.batch_size), self.df_dim))
+            if self.config.model == 'optme':
+                with tf.variable_scope('discriminator'):
+                    self.me_test_images = tf.get_variable(
+                        'd_me_test_images', 
+#                        [self.batch_size, self.output_size, self.output_size, self.c_dim],
+                        initializer=self.test_location_initializer()
+                    )
+                meti = tf.clip_by_value(tf.gather(self.me_test_images, im_id), 0, 1)
+                bloc = int(np.ceil(np.sqrt(self.df_dim)))
+                tf.summary.image("train/me test image", self.imageRearrange(meti, bloc))
+            else:
+                self.me_test_images = tf.placeholder(
+                    tf.float32, 
+                    [self.batch_size, self.output_size, self.output_size, self.c_dim],
+                    name='me_test_images'
+                )
+            
             if self.config.dc_discriminator:
                 metl = self.discriminator(self.me_test_images, reuse=True)
             else:
@@ -109,7 +138,7 @@ class me_DCGAN(DCGAN):
         if self.config.use_kernel:
             feed_dict = {self.lr: self.current_lr, self.images: batch_images,
                          self.z: batch_z}
-            if self.config.kernel != '':
+            if (self.config.kernel != '') and (self.config.model != 'optme'):
                 feed_dict.update({self.me_test_images: self.additional_sample_images})
             if self.config.is_demo:
                 summary_str, step, optim_loss = self.sess.run(
@@ -147,7 +176,7 @@ class me_DCGAN(DCGAN):
             
         if self.counter == 1:
             print('current learning rate: %f' % self.current_lr)
-        if self.config.dc_discriminator:
+        if self.config.dc_discriminator or (self.config.model == 'optme'):
             d_steps = self.config.dsteps
             if ((self.counter % 100 == 0) or (self.counter < 20)):
                 d_steps = self.config.start_dsteps

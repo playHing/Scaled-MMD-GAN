@@ -85,25 +85,6 @@ def cholesky_blocked(A, matrix_order = None, block_size = 200):
 
 
 def me_loss(X, Y, d, batch_size, with_inv=True):
-#    muX = tf.reduce_mean(X, axis=0)
-#    muY = tf.reduce_mean(Y, axis=0)
-#    
-#    c = lambda x: tf.expand_dims(x, 0)
-#    
-##    CXY = tf.matmul(tf.transpose(X - c(muX)), Y - c(muY), transpose_b=False)
-#    CXY = tf.matmul(tf.transpose(X), Y, transpose_b=False)
-#    
-#    d = X.get_shape()[1]
-#    L = cholesky_unblocked(CXY)
-#    I = tf.Variable(tf.diag(tf.ones(d)))
-#    Linv = tf.matrix_triangular_solve(L, I)
-#    
-#    Cinv = tf.matmul(tf.transpose(Linv), Linv)
-#    
-#    diff = c(muX - muY)
-#    loss = tf.matmul(tf.matmul(diff, Cinv), tf.transpose(diff))
-#    return loss, diff, Linv, Cinv
-
     eps = .00001
 
     Z = tf.transpose(X - Y)
