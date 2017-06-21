@@ -143,9 +143,8 @@ def lrelu(x, leak=0.2, name="lrelu"):
     return tf.maximum(x, leak*x)
 
 
-def linear(input_, output_size, scope=None, stddev=0.02, bias_start=0.0, with_w=False):
+def linear(input_, output_size, name="Linear", stddev=0.02, bias_start=0.0, with_w=False):
     shape = input_.get_shape().as_list()
-    name = scope or "Linear"
     
     with tf.variable_scope(name):
         scope_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 

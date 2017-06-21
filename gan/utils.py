@@ -228,12 +228,13 @@ def variable_summary(var, name):
     if var is None:
         print("Variable Summary: None value for variable '%s'" % name)
         return
+    var = tf.clip_by_value(var, -1000., 1000.)
     mean = tf.reduce_mean(var)
-    with tf.name_scope('stddev'):
-        stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
-    tf.summary.scalar(name + '_stddev', stddev)
-    tf.summary.scalar(name + '_norm', tf.sqrt(tf.reduce_mean(tf.square(var))))
-    tf.summary.histogram(name + '_histogram', var)    
+    with tf.name_scope('absdev'):
+        stddev = tf.reduce_mean(tf.abs(var - mean))
+    tf.summary.scalar(name + '_absdev', stddev)
+#    tf.summary.scalar(name + '_norm', tf.sqrt(tf.reduce_mean(tf.square(var))))
+    tf.summary.histogram(name + '_histogram', var)
         
 def variable_summaries(vars_and_names):
     for vn in vars_and_names:

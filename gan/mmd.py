@@ -13,7 +13,27 @@ _eps=1e-8
 ################################################################################
 ### Quadratic-time MMD with Gaussian RBF kernel
 
-def _mix_rbf_kernel(X, Y, sigmas, wts=None, K_XY_only=False):
+def _Euclidean_kernel(X, Y, K_XY_only=False):
+    XX = tf.matmul(X, X, transpose_b=True)
+    XY = tf.matmul(X, Y, transpose_b=True)
+    YY = tf.matmul(Y, Y, transpose_b=True)
+
+    X_sqnorms = tf.diag_part(XX)
+    Y_sqnorms = tf.diag_part(YY)    
+
+    r = lambda x: tf.expand_dims(x, 0)
+    c = lambda x: tf.expand_dims(x, 1)
+    
+    K_XY = -(c(X_sqnorms) - 2 * XY + r(Y_sqnorms))
+    if K_XY_only:
+        return K_XY
+    
+    K_XX = -(c(X_sqnorms) - 2 * XX + r(X_sqnorms))
+    K_YY = -(c(Y_sqnorms) - 2 * YY + r(Y_sqnorms))
+    
+    return K_XX, K_XY, K_YY, False
+
+def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, K_XY_only=False):
     if wts is None:
         wts = [1] * len(sigmas)
 
@@ -43,7 +63,7 @@ def _mix_rbf_kernel(X, Y, sigmas, wts=None, K_XY_only=False):
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
 
 
-def _mix_rq_kernel(X, Y, alphas=[1], wts=None, K_XY_only=False):
+def _mix_rq_kernel(X, Y, alphas=[.001, .01, .1, 1.0, 10.0], wts=None, K_XY_only=False):
     """
     Rational quadratic kernel
     http://www.cs.toronto.edu/~duvenaud/cookbook/index.html
@@ -131,6 +151,9 @@ def mix_di_mmd2(X, Y, z, alphas=(1,), wts=None, biased=True):
     K_XX, K_XY, K_YY, d = _mix_di_kernel(X, Y, z, alphas, wts)
     return _mmd2(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
 
+def Euclidean_mmd2(X, Y, biased=True):
+    K_XX, K_XY, K_YY = _Euclidean_kernel(X, Y)
+    return _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=biased)
 
 def rbf_mmd2_and_ratio(X, Y, sigma=1, biased=True):
     return mix_rbf_mmd2_and_ratio(X, Y, sigmas=[sigma], biased=biased)
@@ -149,10 +172,18 @@ def mix_rq_mmd2_and_ratio(X, Y, alphas=(1,), wts=None, biased=True):
 def mix_di_mmd2_and_ratio(X, Y, z, alphas=(1,), wts=None, biased=True):
     K_XX, K_XY, K_YY, d = _mix_di_kernel(X, Y, z, alphas, wts)
     return _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
+
+def Euclidean_mmd2_and_ratio(X, Y, biased=True):
+    K_XX, K_XY, K_YY = _Euclidean_kernel(X, Y)
+    return _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=False, biased=biased)    
 ################################################################################
 ### Helper functions to compute variances based on kernel matrices
 
 
+def mmd2(K, biased=False):
+    K_XX, K_XY, K_YY, const_diagonal = K
+    return _mmd2(K_XX, K_XY, K_YY, const_diagonal, biased)
+    
 def _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
     m = tf.cast(K_XX.get_shape()[0], tf.float32)
     n = tf.cast(K_YY.get_shape()[0], tf.float32)
@@ -163,6 +194,7 @@ def _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
               - 2 * tf.reduce_sum(K_XY) / (m * n))
     else:
         if const_diagonal is not False:
+            const_diagonal = tf.cast(const_diagonal, tf.float32)
             trace_X = m * const_diagonal
             trace_Y = n * const_diagonal
         else:
@@ -175,7 +207,10 @@ def _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
 
     return mmd2
 
-
+def mmd2_and_ratio(K, biased=False, min_var_est=_eps):
+    K_XX, K_XY, K_YY, const_diagonal = K
+    return _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal, biased, min_var_est)
+    
 def _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=False, biased=False,
                     min_var_est=_eps):
     mmd2, var_est = _mmd2_and_variance(

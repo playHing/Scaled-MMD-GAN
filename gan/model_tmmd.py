@@ -1,4 +1,4 @@
-import mmd
+import mmd as MMD
 
 from model_mmd import DCGAN, tf, np
 from utils import variable_summaries
@@ -6,7 +6,7 @@ from utils import variable_summaries
 class tmmd_DCGAN(DCGAN):
     def __init__(self, sess, config, is_crop=True,
                  batch_size=64, output_size=64,
-                 z_dim=100, gf_dim=64, df_dim=16,
+                 z_dim=100,
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
         """
@@ -23,19 +23,21 @@ class tmmd_DCGAN(DCGAN):
         """
         super(tmmd_DCGAN, self).__init__(sess=sess, config=config, is_crop=is_crop,
              batch_size=batch_size, output_size=output_size, z_dim=z_dim, 
-             gf_dim=gf_dim, df_dim=df_dim, gfc_dim=gfc_dim, dfc_dim=dfc_dim, 
-             c_dim=c_dim, dataset_name=dataset_name, checkpoint_dir=checkpoint_dir,
+             gfc_dim=gfc_dim, dfc_dim=dfc_dim, c_dim=c_dim, 
+             dataset_name=dataset_name, checkpoint_dir=checkpoint_dir,
              sample_dir=sample_dir, log_dir=log_dir, data_dir=data_dir)
 
 
     def set_loss(self, G, images):
         if self.config.kernel == 'rbf': # Gaussian kernel
             bandwidths = [1., 2., 4., 8. ,16.]
-            tmmd2 = lambda gg, ii: mmd.mix_rbf_mmd2_and_ratio(
+            tmmd2 = lambda gg, ii: MMD.mix_rbf_mmd2_and_ratio(
                 gg, ii, sigmas=bandwidths)
+        elif self.config.kernel == 'Euclidean': # -||x-y||^2 kenrel
+            tmmd2 = lambda gg, ii: MMD.Euclidean_mmd2_and_ratio(gg, ii)    
         elif self.config.kernel == 'rq': # Rational quadratic kernel
             alphas = [.001, .01, .1, 1.0, 10.0]
-            tmmd2 = lambda gg, ii: mmd.mix_rq_mmd2_and_ratio(
+            tmmd2 = lambda gg, ii: MMD.mix_rq_mmd2_and_ratio(
                 gg, ii, alphas=alphas)
         elif self.config.kernel == 'di': # Distance - induced kernel
             self.di_kernel_z_images = tf.placeholder(
@@ -50,7 +52,7 @@ class tmmd_DCGAN(DCGAN):
                         self.di_kernel_z_images, reuse=True)[di_r: di_r + 1]
             else:
                 self.di_kernel_z = tf.reshape(self.di_kernel_z_images[di_r: di_r + 1], [1, -1])
-            tmmd2 = lambda gg, ii: mmd.mix_di_mmd2_and_ratio(
+            tmmd2 = lambda gg, ii: MMD.mix_di_mmd2_and_ratio(
                     gg, ii, self.di_kernel_z, alphas=alphas)
         else:
             raise Exception("Kernel '%s' not implemented for %s model" % 
@@ -61,10 +63,10 @@ class tmmd_DCGAN(DCGAN):
             tf.summary.scalar("kernel_loss", self.kernel_loss)
             tf.summary.scalar("ratio_loss", self.ratio_loss)
             self.kernel_loss = tf.sqrt(self.kernel_loss)
-            self.optim_loss = self.ratio_loss
+            self.optim_loss = tf.sqrt(self.ratio_loss)
             self.optim_name = 'ratio loss'
             
 #            variable_summaries([(tf.clip_by_value(self.var_est, 0, 100000.0), 
 #                                 'variance_estimate')])
             
-            self.add_gradient_penalty(lambda gg, ii: tmmd2(gg, ii)[1], G, images)      
+            self.add_gradient_penalty(lambda gg, ii: tf.sqrt(tmmd2(gg, ii)[1]), G, images)    

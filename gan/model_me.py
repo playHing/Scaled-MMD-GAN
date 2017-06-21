@@ -1,4 +1,4 @@
-import mmd
+import mmd as MMD
 
 from model_mmd import DCGAN, tf, np
 from utils import variable_summaries
@@ -11,7 +11,7 @@ import time
 class me_DCGAN(DCGAN):
     def __init__(self, sess, config, is_crop=True,
                  batch_size=64, output_size=64,
-                 z_dim=100, gf_dim=8, df_dim=16,
+                 z_dim=100, 
                  gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
                  checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
         """
@@ -29,7 +29,7 @@ class me_DCGAN(DCGAN):
         self.asi = [np.zeros([batch_size, output_size, output_size, c_dim])]
         super(me_DCGAN, self).__init__(sess=sess, config=config, is_crop=is_crop,
              batch_size=batch_size, output_size=output_size, z_dim=z_dim, 
-             gf_dim=gf_dim, df_dim=df_dim, gfc_dim=gfc_dim, dfc_dim=dfc_dim, 
+             gfc_dim=gfc_dim, dfc_dim=dfc_dim, 
              c_dim=c_dim, dataset_name=dataset_name, checkpoint_dir=checkpoint_dir,
              sample_dir=sample_dir, log_dir=log_dir, data_dir=data_dir)
         
@@ -51,11 +51,13 @@ class me_DCGAN(DCGAN):
         if self.config.kernel == '':
             me = lambda gg, ii: me_loss(
                 gg, ii, self.df_dim, self.batch_size,
-                with_inv=True#(self.config.gradient_penalty == 0)
+                with_inv=(self.config.gradient_penalty == 0)
             )
-            self.optim_name = 'mean embedding loss'
+            self.optim_name = 'me loss'
+            with tf.variable_scope('loss'):
+                self.optim_loss, Z = me(G, images)
         else:
-            im_id = tf.constant(np.random.choice(np.arange(self.batch_size), self.df_dim))
+            im_id = tf.constant(np.random.choice(np.arange(self.batch_size), self.config.test_locations))
             if self.config.model == 'optme':
                 with tf.variable_scope('discriminator'):
                     self.me_test_images = tf.get_variable(
@@ -64,7 +66,7 @@ class me_DCGAN(DCGAN):
                         initializer=self.test_location_initializer()
                     )
                 meti = tf.clip_by_value(tf.gather(self.me_test_images, im_id), 0, 1)
-                bloc = int(np.ceil(np.sqrt(self.df_dim)))
+                bloc = int(np.floor(np.sqrt(self.config.test_locations)))
                 tf.summary.image("train/me test image", self.imageRearrange(meti, bloc))
             else:
                 self.me_test_images = tf.placeholder(
@@ -79,57 +81,67 @@ class me_DCGAN(DCGAN):
                 metl = tf.reshape(self.me_test_images, [self.batch_size, -1])
             self.me_test_locations = tf.gather(metl, im_id)
             
-            if self.config.kernel == 'rbf': # Gaussian kernel
-                bandwidths = [2.0, 5.0, 10.0, 20.0, 40.0, 80.0]
-                k = lambda gg, ii: mmd._mix_rbf_kernel(
-                    gg, ii, sigmas=bandwidths, K_XY_only=True
-                )
-            elif self.config.kernel == 'rq': # Rational quadratic kernel
-                alphas = [.001, .01, .1, 1.0, 10.0]
-                k = lambda gg, ii: mmd._mix_rq_kernel(
-                    gg, ii, alphas=alphas, K_XY_only=True
-                )
-            else: 
-                raise ValueError("Kernel '%s' not supported" % self.config.kernel)
-            me = lambda gg, ii: me_loss(
-                k(gg, self.me_test_locations),
-                k(ii, self.me_test_locations), 
-                self.df_dim, self.batch_size,
-                with_inv=(self.config.gradient_penalty == 0)
-            )
+            assert self.config.kernel in ['Euclidean', 'mix_rq', 'mix_rbf'], \
+                "Kernel '%s' not supported" % self.config.kernel
+            kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
+            k_test = lambda gg: kernel(gg, self.me_test_locations, K_XY_only=True)
             self.optim_name = self.config.kernel + ' kernel mean embedding loss'
-        with tf.variable_scope('loss'):
-            self.optim_loss = me(G, images)
-            tf.summary.scalar(self.optim_name, self.optim_loss)
+            with tf.variable_scope('loss'):
+                self.optim_loss, Z = me_loss(
+                    k_test(G), k_test(images),
+                    self.df_dim, self.batch_size,
+                    with_inv=(self.config.gradient_penalty == 0),
+                    with_Z=True
+                )
+                                             
+    #            tf.summary.scalar(self.optim_name, self.optim_loss)
+    
+                self.add_gradient_penalty(k_test, G, images, Z)      
 
-            self.add_gradient_penalty(me, G, images)      
-
-    def discriminator(self, image, y=None, reuse=False):
-        with tf.variable_scope("discriminator") as scope:
-            if reuse:
-                scope.reuse_variables()
-
-#            if True: #np.mod(s, 16) == 0:
-##                h0 = self.d_bn0(image)
-##                h0 = h0 + lrelu(conv2d(h0, self.c_dim, name='d_h0_conv', d_h=1, d_w=1))
-##                h1 = self.d_bn1(h0, train=True)
-##                h1 = h1 + lrelu(conv2d(h1, self.c_dim, name='d_h1_conv', d_h=1, d_w=1))
-##                h2 = self.d_bn2(h1, train=True)
-##                h2 = h2 + lrelu(conv2d(h2, self.c_dim, name='d_h2_conv', d_h=1, d_w=1))
-##                h3 = self.d_bn3(h2, train=True)
-##                h3 = h3 + lrelu(conv2d(h3, self.c_dim, name='d_h3_conv', d_h=1, d_w=1))
-#                return linear(tf.reshape(image, [self.batch_size, -1]), self.df_dim, 'd_h4_lin')
-            
-            s = self.df_dim
-            ch = np.ceil(self.output_size/16) ** 2
-            s0, s1, s2, s3 = max(1, int(s/(ch*8))), max(1, int(s/(ch*4))), \
-                        max(1, int(s/(ch*2))), max(1, int(s/ch))
-            h0 = lrelu(self.d_bn0(conv2d(image, s0, name='d_h0_conv')))
-            h1 = lrelu(self.d_bn1(conv2d(h0, s1, name='d_h1_conv')))
-            h2 = lrelu(self.d_bn2(conv2d(h1, s2, name='d_h2_conv')))
-            h3 = lrelu(self.d_bn3(conv2d(h2, s3, name='d_h3_conv')))
-#            h4 = linear(tf.reshape(h3, [self.batch_size, -1]), self.df_dim, 'd_h3_lin')
-            return tf.reshape(h3, [self.batch_size, -1])
+    def add_gradient_penalty(self, k_test, fake_data, real_data, Z):
+        alpha = tf.random_uniform(shape=[self.batch_size, 1], minval=0., maxval=1.)
+        x_hat = (1. - alpha) * real_data + alpha * fake_data
+        witness = tf.matmul(k_test(x_hat), Z)
+        gradients = tf.gradients(witness, [x_hat])[0]
+        penalty = tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0))
+        
+        if self.config.gradient_penalty > 0:
+            self.g_loss = self.optim_loss
+            self.d_loss = -self.optim_loss + penalty * self.config.gradient_penalty
+            self.optim_name += ' gp %.1f' % self.config.gradient_penalty
+        else:
+            self.g_loss = self.optim_loss
+            self.d_loss = -self.optim_loss
+        variable_summaries([(gradients, 'dx_gradients')])
+        tf.summary.scalar(self.optim_name + ' G', self.g_loss)
+        tf.summary.scalar(self.optim_name + ' D', self.d_loss)
+        tf.summary.scalar('dx_penalty', penalty)
+#    def discriminator(self, image, y=None, reuse=False):
+#        with tf.variable_scope("discriminator") as scope:
+#            if reuse:
+#                scope.reuse_variables()
+#
+##            if True: #np.mod(s, 16) == 0:
+###                h0 = self.d_bn0(image)
+###                h0 = h0 + lrelu(conv2d(h0, self.c_dim, name='d_h0_conv', d_h=1, d_w=1))
+###                h1 = self.d_bn1(h0, train=True)
+###                h1 = h1 + lrelu(conv2d(h1, self.c_dim, name='d_h1_conv', d_h=1, d_w=1))
+###                h2 = self.d_bn2(h1, train=True)
+###                h2 = h2 + lrelu(conv2d(h2, self.c_dim, name='d_h2_conv', d_h=1, d_w=1))
+###                h3 = self.d_bn3(h2, train=True)
+###                h3 = h3 + lrelu(conv2d(h3, self.c_dim, name='d_h3_conv', d_h=1, d_w=1))
+##                return linear(tf.reshape(image, [self.batch_size, -1]), self.df_dim, 'd_h4_lin')
+#            
+#            s = self.df_dim
+#            ch = np.ceil(self.output_size/16) ** 2
+#            s0, s1, s2, s3 = max(1, int(s/(ch*8))), max(1, int(s/(ch*4))), \
+#                        max(1, int(s/(ch*2))), max(1, int(s/ch))
+#            h0 = lrelu(self.d_bn0(conv2d(image, s0, name='d_h0_conv')))
+#            h1 = lrelu(self.d_bn1(conv2d(h0, s1, name='d_h1_conv')))
+#            h2 = lrelu(self.d_bn2(conv2d(h1, s2, name='d_h2_conv')))
+#            h3 = lrelu(self.d_bn3(conv2d(h2, s3, name='d_h3_conv')))
+##            h4 = linear(tf.reshape(h3, [self.batch_size, -1]), self.df_dim, 'd_h3_lin')
+#            return tf.reshape(h3, [self.batch_size, -1])
 
     def train_step(self, config, batch_images):
         batch_z = np.random.uniform(
@@ -141,22 +153,22 @@ class me_DCGAN(DCGAN):
             if (self.config.kernel != '') and (self.config.model != 'optme'):
                 feed_dict.update({self.me_test_images: self.additional_sample_images})
             if self.config.is_demo:
-                summary_str, step, optim_loss = self.sess.run(
-                    [self.TrainSummary, self.global_step, self.optim_loss],
+                summary_str, step, g_loss, d_loss = self.sess.run(
+                    [self.TrainSummary, self.global_step, self.g_loss, self.d_loss],
                     feed_dict=feed_dict
                 )
             else:
                 if self.d_counter == 0:
-                    _, summary_str, step, optim_loss = self.sess.run(
-                        [self.g_grads, self.TrainSummary, self.global_step,
-                         self.optim_loss], feed_dict=feed_dict
+                    _, summary_str, step, g_loss, d_loss = self.sess.run(
+                        [self.g_grads, self.TrainSummary, self.global_step, 
+                         self.g_loss, self.d_loss], feed_dict=feed_dict
                     )
                 else:
     #                        (np.mod(counter//100, 5) == 4) and \
     #                        (counter < self.config.max_iteration * 4/4):
-                    _, summary_str, step, optim_loss = self.sess.run(
-                        [self.d_grads, self.TrainSummary, self.global_step,
-                         self.optim_loss], feed_dict=feed_dict
+                    _, summary_str, step, g_loss, d_loss = self.sess.run(
+                        [self.d_grads, self.TrainSummary, self.global_step, 
+                         self.g_loss, self.d_loss], feed_dict=feed_dict
                     )     
         # G STEP
         if self.d_counter == 0:
@@ -168,8 +180,9 @@ class me_DCGAN(DCGAN):
                     print('Step %d summary exception. ' % self.counter, e)
                     self.err_counter += 1
                     
-                print("Epoch: [%2d] time: %4.4f, %s: %.8f"
-                    % (self.counter, time.time() - self.start_time, self.optim_name, optim_loss)) 
+                print("Epoch: [%2d] time: %4.4f, %s, G: %.8f, D: %.8f"
+                    % (self.counter, time.time() - self.start_time, 
+                       self.optim_name, g_loss, d_loss)) 
             if (np.mod(self.counter, self.config.max_iteration//5) == 0):
                 self.current_lr *= self.config.decay_rate
                 print('current learning rate: %f' % self.current_lr)  
@@ -183,4 +196,4 @@ class me_DCGAN(DCGAN):
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         self.counter += (self.d_counter == 0)
         
-        return summary_str, step, optim_loss
+        return summary_str, step, g_loss, d_loss

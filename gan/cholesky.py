@@ -84,27 +84,30 @@ def cholesky_blocked(A, matrix_order = None, block_size = 200):
     return _chol(A, 0, n, nb)
 
 
-def me_loss(X, Y, d, batch_size, with_inv=True):
+def me_loss(X, Y, d, batch_size, with_inv=True, with_Z=False):
     eps = .00001
 
     Z = tf.transpose(X - Y)
     muZ = tf.expand_dims(tf.reduce_mean(Z, axis=1), 1)
 #    c = lambda x: tf.expand_dims(x, 1)
-    if not with_inv:
-        return (tf.matmul(tf.transpose(muZ), muZ) * batch_size)[0][0]
-    Z_ = Z - muZ
-    S = tf.matmul(Z_, tf.transpose(Z_))
-    S = S / np.float(batch_size - 1) + eps * tf.diag(tf.ones(d))
+    if with_inv:
+        Z_ = Z - muZ
+        S = tf.matmul(Z_, tf.transpose(Z_))
+        S = S / np.float(batch_size - 1) + eps * tf.diag(tf.ones(d))
+        
+    #    L = cholesky_unblocked(S)
+        L = tf.cholesky(S)
+    #    return Z, Z_, S, L
+        I = tf.Variable(tf.diag(tf.ones(d)))
+        Linv = tf.matrix_triangular_solve(L , I)
+        Sinv = tf.matmul(tf.transpose(Linv), Linv)
     
-#    L = cholesky_unblocked(S)
-    L = tf.cholesky(S)
-#    return Z, Z_, S, L
-    I = tf.Variable(tf.diag(tf.ones(d)))
-    Linv = tf.matrix_triangular_solve(L , I)
-    Sinv = tf.matmul(tf.transpose(Linv), Linv)
-
-    lambda_n = tf.matmul(tf.matmul(tf.transpose(muZ), Sinv), muZ) * batch_size
+        lambda_n = tf.matmul(tf.matmul(tf.transpose(muZ), Sinv), muZ) * batch_size
+    else: 
+        lambda_n = tf.matmul(tf.transpose(muZ), muZ) * batch_size
     
+    if with_Z:
+        return lambda_n[0][0], muZ * batch_size
     return lambda_n[0][0]
 #    
 #N = 1000

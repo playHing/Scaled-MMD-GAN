@@ -9,6 +9,7 @@ import tensorflow as tf
 flags = tf.app.flags
 flags.DEFINE_integer("max_iteration", 400000, "Epoch to train [400000]")
 flags.DEFINE_float("learning_rate", 2, "Learning rate [2]")
+flags.DEFINE_float("learning_rate_D", -1, "Learning rate for discriminator, if negative same as generator [-1]")
 flags.DEFINE_float("decay_rate", .5, "Decay rate [1.0]")
 flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
 flags.DEFINE_float("init", 0.02, "Initialization value [0.02]")
@@ -22,7 +23,7 @@ flags.DEFINE_string("checkpoint_dir", "checkpoint_mmd", "Directory name to save 
 flags.DEFINE_string("sample_dir", "samples_mmd", "Directory name to save the image samples [samples_mmd]")
 flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image samples [logs_mmd]")
 flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
-flags.DEFINE_string("architecture", "dc", "The name of the architecture [dc, mlp]")
+flags.DEFINE_string("architecture", "dc", "The name of the architecture [dc, mlp, dfc]")
 flags.DEFINE_string("kernel", "rbf", "The name of the architecture [rbf, rq, di]")
 flags.DEFINE_string("model", "mmd", "The name of the kernel loss model [mmd, tmmd, me]")
 flags.DEFINE_boolean("dc_discriminator", False, "use deep convolutional discriminator [True]")
@@ -34,10 +35,12 @@ flags.DEFINE_boolean("is_demo", False, "For testing [False]")
 flags.DEFINE_float("gradient_penalty", 0.0, "Use gradient penalty [0.0]")
 flags.DEFINE_float("discriminator_weight_clip", 0.0, "Use discriminator weight clip [0.0]")
 flags.DEFINE_integer("threads", np.inf, "Upper limit for number of threads [np.inf]")
-flags.DEFINE_integer("dsteps", 1, "Number of discrimintor steps per one generator step" [1])
+flags.DEFINE_integer("dsteps", 1, "Number of discrimintor steps per one generator step [1] ")
 flags.DEFINE_integer("start_dsteps", 1, "Number of discrimintor steps per one generator step during first 20 steps and every 100th step" [1])
-
-
+flags.DEFINE_integer("df_dim", 64, "Discriminator output dimension [64]")
+flags.DEFINE_integer("gf_dim", 64, "no of generator channels [64]")
+flags.DEFINE_boolean("batch_norm", False, "Use of batch norm [False] (always False for discriminator if gradient_penalty > 0)")
+flags.DEFINE_integer("test_locations", 16, "No of test locations for mean-embedding model [16] ")
 FLAGS = flags.FLAGS
 
 def main(_):
@@ -57,10 +60,8 @@ def main(_):
     else:
         sess_config = tf.ConfigProto()
         
-    if FLAGS.model == 'mmd':
+    if FLAGS.model in ['mmd', 'tmmd']:
         from model_mmd import DCGAN as model
-    elif FLAGS.model == 'tmmd':
-        from model_tmmd import tmmd_DCGAN as model
     elif (FLAGS.model == 'me') or (FLAGS.model == 'optme'):
         from model_me import me_DCGAN as model
         
@@ -82,7 +83,7 @@ def main(_):
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, checkpoint_dir=checkpoint_dir_, 
                           sample_dir=sample_dir_, log_dir=log_dir_, data_dir=FLAGS.data_dir)
         else:
-            dcgan = model(sess, image_size=FLAGS.image_size, batch_size=FLAGS.batch_size, 
+            dcgan = model(sess, batch_size=FLAGS.batch_size, 
                           output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, 
                           checkpoint_dir=FLAGS.checkpoint_dir, sample_dir=FLAGS.sample_dir,
