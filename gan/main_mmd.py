@@ -24,7 +24,7 @@ flags.DEFINE_string("sample_dir", "samples_mmd", "Directory name to save the ima
 flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image samples [logs_mmd]")
 flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
 flags.DEFINE_string("architecture", "dc", "The name of the architecture [dc, mlp, dfc]")
-flags.DEFINE_string("kernel", "rbf", "The name of the architecture [rbf, rq, di]")
+flags.DEFINE_string("kernel", "rbf", "The name of the architecture [mix_rbf, mix_rq, Euclidean, di]")
 flags.DEFINE_string("model", "mmd", "The name of the kernel loss model [mmd, tmmd, me]")
 flags.DEFINE_boolean("dc_discriminator", False, "use deep convolutional discriminator [True]")
 flags.DEFINE_boolean("is_train", False, "True for training, False for testing [False]")

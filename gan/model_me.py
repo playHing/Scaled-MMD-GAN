@@ -93,9 +93,6 @@ class me_DCGAN(DCGAN):
                     with_inv=(self.config.gradient_penalty == 0),
                     with_Z=True
                 )
-                                             
-    #            tf.summary.scalar(self.optim_name, self.optim_loss)
-    
                 self.add_gradient_penalty(k_test, G, images, Z)      
 
     def add_gradient_penalty(self, k_test, fake_data, real_data, Z):
