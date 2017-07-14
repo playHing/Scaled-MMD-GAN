@@ -8,10 +8,14 @@ import scipy.misc
 from six.moves import xrange
 import tensorflow as tf
 import matplotlib.pyplot as plt
+from PIL import Image
+import lmdb
+import io
+import sys
 
 import mmd as MMD
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
-from utils import save_images, unpickle, read_and_scale, center_and_scale, variable_summaries, conv_sizes
+from utils import save_images, unpickle, read_and_scale, center_and_scale, variable_summaries, conv_sizes, pp
 
 class DCGAN(object):
     def __init__(self, sess, config, is_crop=True,
@@ -43,9 +47,9 @@ class DCGAN(object):
 #        if self.config.dataset == 'GaussianMix':
 #            self.sample_size = min(16 * batch_size, 512)
         self.output_size = output_size
-        self.sample_dir = sample_dir
-        self.log_dir=log_dir
-        self.checkpoint_dir = checkpoint_dir
+        self.sample_dir = sample_dir + config.suffix
+        self.log_dir=log_dir + config.suffix
+        self.checkpoint_dir = checkpoint_dir + config.suffix
         self.data_dir = data_dir
         self.z_dim = z_dim
 
@@ -100,6 +104,22 @@ class DCGAN(object):
                     self.output_size, lr))
         if self.config.batch_norm:
             self.description += '_bn'
+            
+        if self.config.log:
+            sample_dir = os.path.join(self.sample_dir, self.description)
+            if not os.path.exists(sample_dir):
+                os.makedirs(sample_dir)
+            self.old_stdout = sys.stdout
+            self.log_file = open(os.path.join(sample_dir, 'log.txt'), 'w', buffering=1)
+            print('Execution start time: %s' % time.ctime())
+            print('Log file: %s' % self.log_file)
+#            print('DC FLAGS')
+#            print(self.config)
+#            print('DC FLAGS.__flags')
+#            pp.pprint(config.__flags)
+            sys.stdout = self.log_file        
+        print('Execution start time: %s' % time.ctime())
+#        pp.pprint(self.config.__flags)
         self.build_model()
 
 
@@ -116,11 +136,14 @@ class DCGAN(object):
     def build_model(self):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.lr = tf.placeholder(tf.float32, shape=[])
-        self.images = tf.placeholder(
-            tf.float32, 
-            [self.batch_size, self.output_size, self.output_size, self.c_dim],
-            name='real_images'
-        )
+        if 'lsun' in self.config.dataset:
+            self.images = self.set_lmdb_pipeline()
+        else:
+            self.images = tf.placeholder(
+                tf.float32, 
+                [self.batch_size, self.output_size, self.output_size, self.c_dim],
+                name='real_images'
+            )
         self.sample_images = tf.placeholder(
             tf.float32, 
             [self.sample_size, self.output_size, self.output_size, self.c_dim],
@@ -130,16 +153,9 @@ class DCGAN(object):
 
         tf.summary.histogram("z", self.z)
 
-        if self.config.dataset == 'cifar10':
-            self.G = self.generator_cifar10(self.z)
-        elif self.config.dataset == 'mnist':
-            self.G = self.generator_mnist(self.z)
-        elif 'lsun' in self.config.dataset:
-            self.G = self.generator_lsun(self.z)
-        elif self.config.dataset == 'GaussianMix':
-            self.G = self.generator(self.z)
-        else:
-            raise ValueError("not implemented dataset '%s'" % self.config.dataset)
+        self.G = self.generator(self.z)
+        self.sampler = self.generator(self.z, is_train=False, reuse=True)
+        
         if self.config.dc_discriminator:
             images = self.discriminator(self.images, reuse=False)
             G = self.discriminator(self.G, reuse=True)
@@ -154,17 +170,7 @@ class DCGAN(object):
                          self.imageRearrange(tf.clip_by_value(self.images, 0, 1), block))
         tf.summary.image("train/gen image", 
                          self.imageRearrange(tf.clip_by_value(self.G, 0, 1), block))
-
-        if self.config.dataset == 'cifar10':
-            self.sampler = self.generator_cifar10(self.z, is_train=False, reuse=True)
-        elif self.config.dataset == 'mnist':
-            self.sampler = self.generator_mnist(self.z, is_train=False, reuse=True)
-        elif 'lsun' in self.config.dataset:
-            self.sampler = self.generator_lsun(self.z, is_train=False, reuse=True)
-        elif self.config.dataset == 'GaussianMix':
-            self.sampler = self.generator(self.z, is_train=False, reuse=True)
-        else:
-            self.sampler = self.generator_any_set(self.z, is_train=False, reuse=True)
+        
         t_vars = tf.trainable_variables()
 
         self.d_vars = [var for var in t_vars if 'd_' in var.name]
@@ -205,7 +211,10 @@ class DCGAN(object):
         
 
     def add_gradient_penalty(self, kernel, fake_data, real_data):
-        alpha = tf.random_uniform(shape=[self.batch_size, 1], minval=0., maxval=1.)
+        minv, maxv = 0., 1.
+        if 'mid' in self.config.suffix:
+            minv, maxv = .4, .6
+        alpha = tf.random_uniform(shape=[self.batch_size, 1], minval=minv, maxval=maxv)
         x_hat = (1. - alpha) * real_data + alpha * fake_data
         Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
         witness = Ekx(real_data) - Ekx(fake_data)
@@ -238,7 +247,7 @@ class DCGAN(object):
                 g_gvs, 
                 global_step=self.global_step
             )
-        if self.config.dc_discriminator or (self.config.model == 'optme'):
+        if self.config.dc_discriminator or ('optme' in self.config.model):
             with tf.variable_scope("D_grads"):
                 self.d_kernel_optim = tf.train.AdamOptimizer(
                     self.lr * self.config.learning_rate_D / self.config.learning_rate, 
@@ -261,11 +270,11 @@ class DCGAN(object):
             self.d_grads = None
     
 
-    def save_samples(self, freq=1000):
+    def save_samples(self, freq=2):
         if (np.mod(self.counter, freq) == 1) and (self.d_counter == 0):
             self.save(self.checkpoint_dir, self.counter)
             samples = self.sess.run(self.sampler, feed_dict={
-                self.z: self.sample_z, self.images: self.sample_images})
+                self.z: self.sample_z})#, self.images: self.sample_images})
             print(samples.shape)
             sample_dir = os.path.join(self.sample_dir, self.description)
             if not os.path.exists(sample_dir):
@@ -277,7 +286,7 @@ class DCGAN(object):
     def make_video(self, G_config, optim_loss, freq=10):
         if np.mod(self.counter, freq) == 1:          
             samples = self.sess.run(self.sampler, feed_dict={
-                self.z: self.sample_z, self.images: self.sample_images})
+                self.z: self.sample_z})#, self.images: self.sample_images})
             if G_config['g_line'] is not None:
                 G_config['g_line'].remove()
             G_config['g_line'], = myhist(samples, ax=G_config['ax1'], color='b')
@@ -288,44 +297,52 @@ class DCGAN(object):
                 display(G_config['fig'])
                 
     
-    def train_step(self, config, batch_images):
+    def train_step(self, config, batch_images=None):
         batch_z = np.random.uniform(
             -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
-
+#        write_summary=True
+        write_summary = ((np.mod(self.counter, 50) == 0) and (self.counter < 1000)) \
+                    or (np.mod(self.counter, 1000) == 0) or (self.err_counter > 0)
         if self.config.use_kernel:
-            feed_dict = {self.lr: self.current_lr, self.images: batch_images,
-                         self.z: batch_z}
+            feed_dict = {self.lr: self.current_lr, self.z: batch_z}
+            if batch_images is not None:
+                feed_dict.update({self.images: batch_images})
+            eval_ops = [self.global_step, self.g_loss, self.d_loss]
             if self.config.kernel == 'di':
                 feed_dict.update({self.di_kernel_z_images: self.additional_sample_images})
             if self.config.is_demo:
                 summary_str, step, g_loss, d_loss = self.sess.run(
-                    [self.TrainSummary, self.global_step, self.g_loss, self.d_loss],
+                    [self.TrainSummary] + eval_ops,
                     feed_dict=feed_dict
                 )
             else:
                 if self.d_counter == 0:
-                    _, summary_str, step, g_loss, d_loss = self.sess.run(
-                        [self.g_grads, self.TrainSummary, self.global_step, 
-                         self.g_loss, self.d_loss], feed_dict=feed_dict
-                    )
+                    if write_summary:
+                        _, summary_str, step, g_loss, d_loss = self.sess.run(
+                            [self.g_grads, self.TrainSummary] + eval_ops, 
+                            feed_dict=feed_dict
+                        )
+                    else:
+                        _, step, g_loss, d_loss = self.sess.run(
+                            [self.g_grads] + eval_ops, 
+                            feed_dict=feed_dict
+                        )
                 else:
-    #                        (np.mod(counter//100, 5) == 4) and \
-    #                        (counter < self.config.max_iteration * 4/4):
-                    _, summary_str, step, g_loss, d_loss = self.sess.run(
-                        [self.d_grads, self.TrainSummary, self.global_step, 
-                         self.g_loss, self.d_loss], feed_dict=feed_dict
-                    )     
+                    _, step, g_loss, d_loss = self.sess.run(
+                        [self.d_grads] + eval_ops, feed_dict=feed_dict
+                    )   
+                assert (~np.isnan(g_loss) and ~np.isnan(d_loss)), \
+                    "Epoch: [%2d] time: %4.4f" % (self.counter, time.time() - self.start_time)
         # G STEP
         if self.d_counter == 0:
-            if ((np.mod(self.counter, 50) == 0) and (self.counter < 1000)) \
-                    or (np.mod(self.counter, 1000) == 0) or (self.err_counter > 0):
+            if write_summary:
                 try:
                     self.writer.add_summary(summary_str, step)
                     self.err_counter = 0
                 except Exception as e:
                     print('Step %d summary exception. ' % self.counter, e)
                     self.err_counter += 1
-                    
+                
                 print("Epoch: [%2d] time: %4.4f, %s, G: %.8f, D: %.8f"
                     % (self.counter, time.time() - self.start_time, 
                        self.optim_name, g_loss, d_loss)) 
@@ -335,14 +352,14 @@ class DCGAN(object):
             
         if self.counter == 1:
             print('current learning rate: %f' % self.current_lr)
-        if self.config.dc_discriminator:
+        if self.d_grads is not None:
             d_steps = self.config.dsteps
             if ((self.counter % 100 == 0) or (self.counter < 20)):
                 d_steps = self.config.start_dsteps
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         self.counter += (self.d_counter == 0)
         
-        return summary_str, step, g_loss, d_loss
+        return g_loss, d_loss
       
 
     def train_init(self):
@@ -406,7 +423,7 @@ class DCGAN(object):
             batch_images = data_X[perm[idx*config.batch_size:
                                        (idx+1)*config.batch_size]]
 
-            summary_str, step, g_loss, d_loss = self.train_step(config, batch_images)
+            g_loss, d_loss = self.train_step(config, batch_images)
               
             self.save_samples()
             if config.dataset == 'GaussianMix':
@@ -414,7 +431,7 @@ class DCGAN(object):
         if config.dataset == 'GaussianMix':
             G_config['writer'].finish()    
 
-    def train_large(self, config):
+    def train_large_old(self, config):
         """Train DCGAN"""
         generator = self.gen_train_samples_from_lmdb()
         if 'lsun' in self.dataset_name:
@@ -431,10 +448,99 @@ class DCGAN(object):
         while self.counter < self.config.max_iteration:
             batch_images = next(generator)
             
-            summary_str, step, g_loss, d_loss = self.train_step(config, batch_images)
+            g_loss, d_loss = self.train_step(config, batch_images)
             
             self.save_samples()
+
+
+    def set_lmdb_pipeline(self):
+        self.start_time = time.time()
+        data_dir = os.path.join(self.data_dir, self.dataset_name)
+        keys = []
+        read_batch = 10000
+        # getting keys in database
+        env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
+        with env.begin() as txn:
+            cursor = txn.cursor()
+            while cursor.next():
+                keys.append(cursor.key())
+        print('Number of records in lmdb: %d' % len(keys))
+        env.close()
+        
+        # value [np.array] reader for given key
+        self.read_count = 0
+        def get_sample_from_lmdb(key, limit=read_batch):
+            rc = self.read_count
+            self.read_count += 1
+            tt = time.time()
+            print('[%d][%f] read start' % (rc, tt - self.start_time))
+            env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
+            ims = []
+            with env.begin(write=False) as txn:
+                cursor = txn.cursor()
+                cursor.set_key(key)
+                while len(ims) < limit:
+                    key, byte_arr = cursor.item()
+                    im = Image.open(io.BytesIO(byte_arr))
+                    ims.append(center_and_scale(im, size=self.output_size))
+                    if not cursor.next():
+                        cursor.first()
+#                        print('back to first')
+#                    if len(ims) % 100 == 0:
+#                        print('len(ims) = %d' % len(ims)
+            env.close()
+            print('[%d][%f] read time = %f' % (rc, time.time() - self.start_time, time.time() - tt))
+            return np.asarray(ims, dtype=np.float32)
+#                print('output_size: ' + repr(self.output_size))
+#                print('scaled_im.dtype = ' + repr(scaled_im.dtype))
+        
+        # setting sample images
+        choice = np.random.choice(keys, 1)[0]
+        sampled = get_sample_from_lmdb(choice, self.sample_size + self.batch_size)
+#        self.sample_images = tf.constant(sampled[:self.sample_size], name='sample_images')
+#        self.additional_sample_images = tf.constant(
+#            sampled[self.sample_size: self.sample_size + self.batch_size], 
+#            name='additional_sample_images'
+#        )
+        self.sample_images = sampled[:self.sample_size]
+        self.additional_sample_images = sampled[self.sample_size: self.sample_size + self.batch_size]
+        print('self.sample_images.shape: ' + repr(self.sample_images.shape))
+        print('self.additional_sample_images.shape: ' + repr(self.additional_sample_images.shape))
+        # tf queue for getting keys
+        key_producer = tf.train.string_input_producer(keys, shuffle=True)
+        single_key = key_producer.dequeue()
+        
+        single_sample = tf.py_func(get_sample_from_lmdb, [single_key], tf.float32)
+        single_sample.set_shape([read_batch, self.output_size, self.output_size, self.c_dim])
+        
+#        with tf.Session() as sess:
+#            shape = sess.run(tf.shape(single_sample))
+#            print('single_sample.shape = ' + repr(shape))
+        # if you know the shapes of the tensors you can set them here:
+        # single_example.set_shape([224,224,3])
+
+        # batch queue
+        images = tf.train.shuffle_batch([single_sample], self.batch_size, 
+                                        capacity=read_batch * 4, 
+                                        min_after_dequeue=read_batch//2,
+                                        num_threads=2,
+                                        enqueue_many=True) 
+        return images
+    
+    def train_large(self, config):    
+        self.train_init()
+
+        coord = tf.train.Coordinator()
+        threads = tf.train.start_queue_runners(sess=self.sess, coord=coord)        
+        
+        while self.counter < self.config.max_iteration:
+            g_loss, d_loss = self.train_step(config)
+            self.save_samples()
             
+        coord.request_stop()
+        coord.join(threads)
+        self.sess.close()
+        
                 
     def sampling(self, config):
         self.sess.run(tf.global_variables_initializer())
@@ -544,22 +650,7 @@ class DCGAN(object):
             return conv2
 
 
-    def generator_cifar10(self, z, is_train=True, reuse=False):
-        if self.config.architecture in ['dc', 'dfc']:
-            return self.generator(z, is_train=is_train, reuse=reuse)
-        with tf.variable_scope('generator') as scope:
-            if reuse:
-                scope.reuse_variables()
-            h0 = linear(z, 64, 'g_h0_lin', stddev=self.config.init)
-            h1 = linear(tf.nn.relu(h0), 256, 'g_h1_lin', stddev=self.config.init)
-            h2 = linear(tf.nn.relu(h1), 256, 'g_h2_lin', stddev=self.config.init)
-            h3 = linear(tf.nn.relu(h2), 1024, 'g_h3_lin', stddev=self.config.init)
-            h4 = linear(tf.nn.relu(h3), 32 * 32 * 3, 'g_h4_lin', stddev=self.config.init)
-    
-            return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, 32, 32, 3]) 
-
-
-    def generator_any_set(self, z, is_train=True, reuse=False):
+    def MLP_generator(self, z, is_train=True, reuse=False):
         with tf.variable_scope('generator') as scope:
             if reuse:
                 scope.reuse_variables()
@@ -573,14 +664,14 @@ class DCGAN(object):
             return tf.reshape(tf.nn.sigmoid(h4), [self.batch_size, self.output_size, 
                                                   self.output_size, self.c_dim])
         
-    def generator_lsun(self, z, is_train=True, reuse=False):
-        if self.config.architecture == 'dc':
-            return self.generator(z, is_train=is_train, reuse=reuse)
-        elif self.config.architecture == 'mlp':
-            return self.generator_any_set(z, is_train=is_train, reuse=reuse)
-        raise Exception("architecture '%s' not available" % self.config.architecture)
-        
     def generator(self, z, y=None, is_train=True, reuse=False):
+        if self.config.dataset not in ['mnist', 'cifar10', 'lsun', 'GaussianMix']:
+            raise ValueError("not implemented dataset '%s'" % self.config.dataset)
+        if self.config.dataset == 'mnist':
+            return self.generator_mnist(z, is_train=is_train, reuse=reuse)
+        elif self.config.dataset in ['lsun', 'cifar10']:
+            if self.config.architecture == 'mlp':
+                return self.MLP_generator(z, is_train=is_train, reuse=reuse)
         with tf.variable_scope('generator') as scope:
             if reuse:
                 scope.reuse_variables()
@@ -764,26 +855,36 @@ class DCGAN(object):
         import lmdb
         import io
         data_dir = os.path.join(self.data_dir, self.dataset_name)
-        env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
         sampled = 0
-        buff, buff_lim = [], 5000
+        buff, buff_lim, key = [], 3000, None
         sh = (self.batch_size, self.output_size, self.output_size, self.c_dim)
         while True:
+            env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
             with env.begin(write=False) as txn:
                 cursor = txn.cursor()
-                for k, byte_arr in cursor:
+                if key is None:
+                    cursor.first()
+                else:
+                    cursor.set_key(key)
+                while len(buff) < buff_lim:
+                    key, byte_arr = cursor.item()
                     im = Image.open(io.BytesIO(byte_arr))
                     buff.append(center_and_scale(im, size=self.output_size))
-                    if len(buff) >= buff_lim:
-                        buff = list(np.random.permutation(buff))
-                        n_batches = max(1, len(buff)//(10 * self.batch_size))
-                        for n in xrange(0, n_batches):
-                            batch = np.array(buff[n * self.batch_size: (n + 1) * self.batch_size])
-                            assert batch.shape == sh, "wrong shape: " + repr(batch.shape) + ", should be " + repr(sh)
-                            sampled += self.batch_size
-                            yield batch
-                        buff = buff[n_batches * self.batch_size:]
-        env.close()
+                    print('buff len = ' + repr(len(buff)))
+                    if not cursor.next():
+                        cursor.first()
+                        print('back to first')
+            env.close()
+            buff = list(np.random.permutation(buff))
+            n_batches = max(1, len(buff)//(2 * self.batch_size))
+            for n in xrange(0, n_batches):
+                batch = np.array(buff[n * self.batch_size: (n + 1) * self.batch_size])
+                assert batch.shape == sh, "wrong shape: " + repr(batch.shape) + ", should be " + repr(sh)
+                sampled += self.batch_size
+                print('sampled: ' + repr(sampled))
+                yield batch
+            buff = buff[n_batches * self.batch_size:]
+
 
         
     def load_GaussianMix(self, means=[.0, 3.0], stds=[1.0, .5], size=1000):

@@ -43,15 +43,15 @@ from PIL import Image
 import lmdb
 import io
 
-env = lmdb.open('./PhD/MMD/opt-mmd/gan/data/bedroom_val_lmdb', map_size=1099511627776,
+env = lmdb.open('./data/lsun/', map_size=1099511627776,
                     max_readers=100, readonly=True)
 txn = env.begin(write=False)
 cursor = txn.cursor()
 i = 0
+
+imgs = []
 for k, byte_arr in cursor:
-    if i > 0:
-        break
-    im = Image.open(io.BytesIO(byte_arr))
+    imgs.append(Image.open(io.BytesIO(byte_arr)))
     i += 1
 
 tempBuff = StringIO()

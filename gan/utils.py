@@ -208,12 +208,29 @@ def center_and_scale(im, size=64) :
     im.thumbnail(new_size)
     arr = np.array(im)
     assert min(arr.shape[:2]) == size, "shape error: " + repr(arr.shape) + ", lower dim should be " + repr(size)
-    l0 = int((arr.shape[0] - size)//2)
-    l1 = int((arr.shape[1] - size)//2)  
+#    l0 = int((arr.shape[0] - size)//2)
+#    l1 = int((arr.shape[1] - size)//2) 
+    l0 = np.random.choice(np.arange(arr.shape[0] - size + 1), 1)[0]
+    l1 = np.random.choice(np.arange(arr.shape[1] - size + 1), 1)[0]
     arr = arr[l0:l0 + size, l1: l1 + size, :]
     sh = (size, size, 3)
     assert arr.shape == sh, "shape error: " + repr(arr.shape) + ", should be " + repr(sh)
-    return arr
+    return np.asarray(arr/255., dtype=np.float32)
+
+
+def center_and_scale_new(im, size=64, assumed_input_size=256, channels=3):
+    if assumed_input_size is not None:
+        ratio = int(assumed_input_size/size)
+        decoded = tf.image.decode_jpeg(im, channels=channels, ratio=ratio)
+        cropped = tf.random_crop(decoded, size=[size, size, 3])
+        return tf.to_float(cropped)/255.
+    size = int(size)
+    decoded = tf.image.decode_jpeg(im, channels=channels)
+    s = tf.reduce_min(tf.shape(decoded)[:2])
+    cropped = tf.random_crop(decoded, size=[s, s, 3])
+    scaled = tf.image.resize_images(cropped, [size, size])
+    return tf.to_float(scaled)/255.
+    
     
 
 def read_and_scale(file, size=64):

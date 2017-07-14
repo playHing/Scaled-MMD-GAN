@@ -35,8 +35,8 @@ class me_DCGAN(DCGAN):
         
     def test_location_initializer(self):
         if 'lsun' in self.config.dataset:
-            generator = self.gen_train_samples_from_lmdb()
-            return tf.constant(next(generator), dtype=tf.float32)
+#            generator = self.gen_train_samples_from_lmdb()
+            data_X = self.additional_sample_images
         if self.config.dataset == 'mnist':
             data_X, data_y = self.load_mnist()
         elif self.config.dataset == 'cifar10':
@@ -45,7 +45,12 @@ class me_DCGAN(DCGAN):
             data_X, _, __ = self.load_GaussianMix()
         else:
             data_X = glob(os.path.join("./data", self.config.dataset, "*.jpg"))
-        return tf.constant(data_X[:self.batch_size], dtype=tf.float32)
+        real = np.asarray(data_X[:self.batch_size], dtype=np.float32)
+        return real
+#        sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
+#        fake = self.sess.run(self.sampler, feed_dict={self.z: sample_z})
+#        p = np.random.binomial(1, .5, size=(self.batch_size, 1, 1, 1))
+#        return p * real + (1 - p) * fake
         
     def set_loss(self, G, images):
         if self.config.kernel == '':
@@ -58,13 +63,16 @@ class me_DCGAN(DCGAN):
                 self.optim_loss, Z = me(G, images)
         else:
             im_id = tf.constant(np.random.choice(np.arange(self.batch_size), self.config.test_locations))
-            if self.config.model == 'optme':
+            if 'optme' in self.config.model:
                 with tf.variable_scope('discriminator'):
                     self.me_test_images = tf.get_variable(
                         'd_me_test_images', 
 #                        [self.batch_size, self.output_size, self.output_size, self.c_dim],
                         initializer=self.test_location_initializer()
                     )
+                p = tf.cast(tf.reshape(tf.multinomial([[.5, .5]], self.batch_size), 
+                                       [self.batch_size, 1, 1, 1]), tf.float32)
+                self.me_test_images = p * self.me_test_images + (1 - p) * self.sampler
                 meti = tf.clip_by_value(tf.gather(self.me_test_images, im_id), 0, 1)
                 bloc = int(np.floor(np.sqrt(self.config.test_locations)))
                 tf.summary.image("train/me test image", self.imageRearrange(meti, bloc))
@@ -74,7 +82,6 @@ class me_DCGAN(DCGAN):
                     [self.batch_size, self.output_size, self.output_size, self.c_dim],
                     name='me_test_images'
                 )
-            
             if self.config.dc_discriminator:
                 metl = self.discriminator(self.me_test_images, reuse=True)
             else:
@@ -93,7 +100,10 @@ class me_DCGAN(DCGAN):
                     with_inv=(self.config.gradient_penalty == 0),
                     with_Z=True
                 )
-                self.add_gradient_penalty(k_test, G, images, Z)      
+                if 'full_gp' in self.config.suffix:
+                    super(me_DCGAN, self).add_gradient_penalty(kernel, G, images)
+                else:
+                    self.add_gradient_penalty(k_test, G, images, Z)      
 
     def add_gradient_penalty(self, k_test, fake_data, real_data, Z):
         alpha = tf.random_uniform(shape=[self.batch_size, 1], minval=0., maxval=1.)
@@ -140,36 +150,42 @@ class me_DCGAN(DCGAN):
 ##            h4 = linear(tf.reshape(h3, [self.batch_size, -1]), self.df_dim, 'd_h3_lin')
 #            return tf.reshape(h3, [self.batch_size, -1])
 
-    def train_step(self, config, batch_images):
+    def train_step(self, config, batch_images=None):
         batch_z = np.random.uniform(
             -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
-
+        
+        write_summary = ((np.mod(self.counter, 50) == 0) and (self.counter < 1000)) \
+                    or (np.mod(self.counter, 1000) == 0) or (self.err_counter > 0)
         if self.config.use_kernel:
-            feed_dict = {self.lr: self.current_lr, self.images: batch_images,
-                         self.z: batch_z}
-            if (self.config.kernel != '') and (self.config.model != 'optme'):
+            feed_dict = {self.lr: self.current_lr, self.z: batch_z}
+            if batch_images is not None:
+                feed_dict.update({self.images: batch_images})
+            eval_ops = [self.global_step, self.g_loss, self.d_loss]
+            if (self.config.kernel != '') and ('optme' not in self.config.model) and ('lsun' not in self.config.dataset):
                 feed_dict.update({self.me_test_images: self.additional_sample_images})
             if self.config.is_demo:
                 summary_str, step, g_loss, d_loss = self.sess.run(
-                    [self.TrainSummary, self.global_step, self.g_loss, self.d_loss],
+                    [self.TrainSummary] + eval_ops,
                     feed_dict=feed_dict
                 )
             else:
                 if self.d_counter == 0:
-                    _, summary_str, step, g_loss, d_loss = self.sess.run(
-                        [self.g_grads, self.TrainSummary, self.global_step, 
-                         self.g_loss, self.d_loss], feed_dict=feed_dict
-                    )
+                    if write_summary:
+                        _, summary_str, step, g_loss, d_loss = self.sess.run(
+                            [self.g_grads, self.TrainSummary] + eval_ops, 
+                            feed_dict=feed_dict
+                        )
+                    else:
+                        _, step, g_loss, d_loss = self.sess.run(
+                            [self.g_grads] + eval_ops, 
+                            feed_dict=feed_dict
+                        )
                 else:
-    #                        (np.mod(counter//100, 5) == 4) and \
-    #                        (counter < self.config.max_iteration * 4/4):
-                    _, summary_str, step, g_loss, d_loss = self.sess.run(
-                        [self.d_grads, self.TrainSummary, self.global_step, 
-                         self.g_loss, self.d_loss], feed_dict=feed_dict
-                    )     
-        # G STEP
+                    _, step, g_loss, d_loss = self.sess.run(
+                        [self.d_grads] + eval_ops, feed_dict=feed_dict
+                    )
         if self.d_counter == 0:
-            if (np.mod(self.counter, 10) == 1) or (self.err_counter > 0):
+            if write_summary:
                 try:
                     self.writer.add_summary(summary_str, step)
                     self.err_counter = 0
@@ -186,11 +202,11 @@ class me_DCGAN(DCGAN):
             
         if self.counter == 1:
             print('current learning rate: %f' % self.current_lr)
-        if self.config.dc_discriminator or (self.config.model == 'optme'):
+        if self.d_grads is not None:
             d_steps = self.config.dsteps
             if ((self.counter % 100 == 0) or (self.counter < 20)):
                 d_steps = self.config.start_dsteps
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         self.counter += (self.d_counter == 0)
         
-        return summary_str, step, g_loss, d_loss
+        return g_loss, d_loss

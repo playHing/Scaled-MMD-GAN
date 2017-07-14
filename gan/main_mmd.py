@@ -1,4 +1,4 @@
-import os
+import os, sys
 import scipy.misc
 import numpy as np
 
@@ -41,10 +41,17 @@ flags.DEFINE_integer("df_dim", 64, "Discriminator output dimension [64]")
 flags.DEFINE_integer("gf_dim", 64, "no of generator channels [64]")
 flags.DEFINE_boolean("batch_norm", False, "Use of batch norm [False] (always False for discriminator if gradient_penalty > 0)")
 flags.DEFINE_integer("test_locations", 16, "No of test locations for mean-embedding model [16] ")
+flags.DEFINE_boolean("log", True, "Wheather to write log to a file in samples directory [True]")
+flags.DEFINE_string("suffix", '', "Additional settings ['']")
 FLAGS = flags.FLAGS
 
 def main(_):
-    pp.pprint(flags.FLAGS.__flags)
+#    print('FLAGS:')
+#    pp.pprint(FLAGS)
+#    print('FLAGS.__flags:')
+    pp.pprint(FLAGS.__flags)
+#    print('FLAGS.__parsed:'):
+#    pp.print()
     sample_dir_ = os.path.join(FLAGS.sample_dir, FLAGS.name)
     checkpoint_dir_ = os.path.join(FLAGS.checkpoint_dir, FLAGS.name)
     log_dir_ = os.path.join(FLAGS.log_dir, FLAGS.name)
@@ -57,12 +64,14 @@ def main(_):
         
     if FLAGS.threads < np.inf:
         sess_config = tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)
+        sess_config.gpu_options.per_process_gpu_memory_fraction = 0.4
+        
     else:
         sess_config = tf.ConfigProto()
         
-    if FLAGS.model in ['mmd', 'tmmd']:
+    if FLAGS.model in ['tmmd', 'mmd']:
         from model_mmd import DCGAN as model
-    elif (FLAGS.model == 'me') or (FLAGS.model == 'optme'):
+    elif (FLAGS.model == 'me') or ('optme' in FLAGS.model):
         from model_me import me_DCGAN as model
         
     with tf.Session(config=sess_config) as sess:
@@ -88,7 +97,6 @@ def main(_):
                           dataset_name=FLAGS.dataset, is_crop=FLAGS.is_crop, 
                           checkpoint_dir=FLAGS.checkpoint_dir, sample_dir=FLAGS.sample_dir,
                           data_dir=FLAGS.data_dir)
-
         if FLAGS.is_train:
             if 'lsun' in FLAGS.dataset:
                 dcgan.train_large(FLAGS)
@@ -107,6 +115,10 @@ def main(_):
             # Below is codes for visualization
             OPTION = 2
             visualize(sess, dcgan, FLAGS, OPTION)
+        
+        if FLAGS.log:
+            sys.stdout = dcgan.old_stdout
+            dcgan.log_file.close()
 
 if __name__ == '__main__':
     tf.app.run()
