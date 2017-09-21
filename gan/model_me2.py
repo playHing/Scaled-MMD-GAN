@@ -1,6 +1,6 @@
 import mmd as MMD
 
-from model_mmd import MMD_GAN, tf, np
+from model_mmd2 import MMD_GAN, tf, np
 from utils import variable_summaries
 from cholesky import me_loss
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
@@ -27,30 +27,30 @@ class ME_GAN(MMD_GAN):
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
         self.asi = [np.zeros([batch_size, output_size, output_size, c_dim])]
-        super(me_DCGAN, self).__init__(sess=sess, config=config, is_crop=is_crop,
+        super(ME_GAN, self).__init__(sess=sess, config=config, is_crop=is_crop,
              batch_size=batch_size, output_size=output_size, z_dim=z_dim, 
              gfc_dim=gfc_dim, dfc_dim=dfc_dim, 
              c_dim=c_dim, dataset_name=dataset_name, checkpoint_dir=checkpoint_dir,
              sample_dir=sample_dir, log_dir=log_dir, data_dir=data_dir)
         
-    def test_location_initializer(self):
-        if 'lsun' in self.config.dataset:
-#            generator = self.gen_train_samples_from_lmdb()
-            data_X = self.additional_sample_images
-        if self.config.dataset == 'mnist':
-            data_X, data_y = self.load_mnist()
-        elif self.config.dataset == 'cifar10':
-            data_X, data_y = self.load_cifar10()
-        elif (self.config.dataset == 'GaussianMix'):
-            data_X, _, __ = self.load_GaussianMix()
-        else:
-            data_X = glob(os.path.join("./data", self.config.dataset, "*.jpg"))
-        real = np.asarray(data_X[:self.batch_size], dtype=np.float32)
-        return real
-#        sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
-#        fake = self.sess.run(self.sampler, feed_dict={self.z: sample_z})
-#        p = np.random.binomial(1, .5, size=(self.batch_size, 1, 1, 1))
-#        return p * real + (1 - p) * fake
+#    def test_location_initializer(self):
+#        if 'lsun' in self.config.dataset:
+##            generator = self.gen_train_samples_from_lmdb()
+#            data_X = self.additional_sample_images
+#        if self.config.dataset == 'mnist':
+#            data_X, data_y = self.load_mnist()
+#        elif self.config.dataset == 'cifar10':
+#            data_X, data_y = self.load_cifar10()
+#        elif (self.config.dataset == 'GaussianMix'):
+#            data_X, _, __ = self.load_GaussianMix()
+#        else:
+#            data_X = glob(os.path.join("./data", self.config.dataset, "*.jpg"))
+#        real = np.asarray(data_X[:self.batch_size], dtype=np.float32)
+#        return real
+##        sample_z = np.random.uniform(-1, 1, size=(self.sample_size , self.z_dim))
+##        fake = self.sess.run(self.sampler, feed_dict={self.z: sample_z})
+##        p = np.random.binomial(1, .5, size=(self.batch_size, 1, 1, 1))
+##        return p * real + (1 - p) * fake
         
     def set_loss(self, G, images):
         if self.config.kernel == '':
@@ -60,7 +60,7 @@ class ME_GAN(MMD_GAN):
             )
             self.optim_name = 'me loss'
             with tf.variable_scope('loss'):
-                self.optim_loss, Z = me(G, images)
+                self.mmd_loss, Z = me(G, images)
         else:
             im_id = tf.constant(np.random.choice(np.arange(self.batch_size), self.config.test_locations))
             if 'optme' in self.config.model:
@@ -68,7 +68,7 @@ class ME_GAN(MMD_GAN):
                     self.me_test_images = tf.get_variable(
                         'd_me_test_images', 
 #                        [self.batch_size, self.output_size, self.output_size, self.c_dim],
-                        initializer=self.test_location_initializer()
+                        initializer=self.additional_sample_images
                     )
                 p = tf.cast(tf.reshape(tf.multinomial([[.5, .5]], self.batch_size), 
                                        [self.batch_size, 1, 1, 1]), tf.float32)
@@ -77,9 +77,9 @@ class ME_GAN(MMD_GAN):
                 bloc = int(np.floor(np.sqrt(self.config.test_locations)))
                 tf.summary.image("train/me test image", self.imageRearrange(meti, bloc))
             else:
-                self.me_test_images = tf.placeholder(
-                    tf.float32, 
-                    [self.batch_size, self.output_size, self.output_size, self.c_dim],
+                self.me_test_images = tf.constant(
+                    value=self.additional_sample_images,
+                    dtype=tf.float32,
                     name='me_test_images'
                 )
             if self.config.dc_discriminator:
@@ -88,22 +88,22 @@ class ME_GAN(MMD_GAN):
                 metl = tf.reshape(self.me_test_images, [self.batch_size, -1])
             self.me_test_locations = tf.gather(metl, im_id)
             
-            assert self.config.kernel in ['Euclidean', 'mix_rq', 'mix_rbf'], \
+            assert self.config.kernel in ['dot', 'mix_rq', 'mix_rbf', 'distance'], \
                 "Kernel '%s' not supported" % self.config.kernel
             kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
             k_test = lambda gg: kernel(gg, self.me_test_locations, K_XY_only=True)
             self.optim_name = self.config.kernel + ' kernel mean embedding loss'
             with tf.variable_scope('loss'):
-                self.optim_loss, Z = me_loss(
-                    k_test(G), k_test(images),
-                    self.df_dim, self.batch_size,
+                self.mmd_loss, Z = me_loss(
+                    k_test(G), k_test(images), 
+                    self.config.test_locations, self.batch_size, #TODO: df_dim not always ok !!!!!!!!
                     with_inv=('vn' in self.config.suffix),
                     with_Z=True
                 )
-                if 'full_gp' in self.config.suffix:
-                    super(ME_GAN, self).add_gradient_penalty(kernel, G, images)
-                else:
-                    self.add_gradient_penalty(k_test, G, images, Z)      
+            if 'full_gp' in self.config.suffix:
+                super(ME_GAN, self).add_gradient_penalty(kernel, G, images)
+            else:
+                self.add_gradient_penalty(k_test, G, images, Z)
 
     def add_gradient_penalty(self, k_test, fake_data, real_data, Z):
         alpha = tf.random_uniform(shape=[self.batch_size, 1], minval=0., maxval=1.)
@@ -123,104 +123,71 @@ class ME_GAN(MMD_GAN):
         if self.config.gradient_penalty > 0:
             self.gp = tf.get_variable('gradient_penalty', dtype=tf.float32,
                                       initializer=self.config.gradient_penalty)
-            self.g_loss = self.optim_loss
-            self.d_loss = -self.optim_loss + penalty * self.gp
+            self.g_loss = self.mmd_loss
+            self.d_loss = -self.mmd_loss + penalty * self.gp
             self.optim_name += ' gp %.1f' % self.config.gradient_penalty
         else:
-            self.g_loss = self.optim_loss
-            self.d_loss = -self.optim_loss
-        variable_summaries([(gradients, 'dx_gradients')])
+            self.g_loss = self.mmd_loss
+            self.d_loss = -self.mmd_loss
+        # variable_summaries([(gradients, 'dx_gradients')])
         tf.summary.scalar(self.optim_name + ' G', self.g_loss)
         tf.summary.scalar(self.optim_name + ' D', self.d_loss)
         tf.summary.scalar('dx_penalty', penalty)
-#    def discriminator(self, image, y=None, reuse=False):
-#        with tf.variable_scope("discriminator") as scope:
-#            if reuse:
-#                scope.reuse_variables()
-#
-##            if True: #np.mod(s, 16) == 0:
-###                h0 = self.d_bn0(image)
-###                h0 = h0 + lrelu(conv2d(h0, self.c_dim, name='d_h0_conv', d_h=1, d_w=1))
-###                h1 = self.d_bn1(h0, train=True)
-###                h1 = h1 + lrelu(conv2d(h1, self.c_dim, name='d_h1_conv', d_h=1, d_w=1))
-###                h2 = self.d_bn2(h1, train=True)
-###                h2 = h2 + lrelu(conv2d(h2, self.c_dim, name='d_h2_conv', d_h=1, d_w=1))
-###                h3 = self.d_bn3(h2, train=True)
-###                h3 = h3 + lrelu(conv2d(h3, self.c_dim, name='d_h3_conv', d_h=1, d_w=1))
-##                return linear(tf.reshape(image, [self.batch_size, -1]), self.df_dim, 'd_h4_lin')
-#            
-#            s = self.df_dim
-#            ch = np.ceil(self.output_size/16) ** 2
-#            s0, s1, s2, s3 = max(1, int(s/(ch*8))), max(1, int(s/(ch*4))), \
-#                        max(1, int(s/(ch*2))), max(1, int(s/ch))
-#            h0 = lrelu(self.d_bn0(conv2d(image, s0, name='d_h0_conv')))
-#            h1 = lrelu(self.d_bn1(conv2d(h0, s1, name='d_h1_conv')))
-#            h2 = lrelu(self.d_bn2(conv2d(h1, s2, name='d_h2_conv')))
-#            h3 = lrelu(self.d_bn3(conv2d(h2, s3, name='d_h3_conv')))
-##            h4 = linear(tf.reshape(h3, [self.batch_size, -1]), self.df_dim, 'd_h3_lin')
-#            return tf.reshape(h3, [self.batch_size, -1])
 
-    def train_step(self, config, batch_images=None):
-        batch_z = np.random.uniform(
-            -1, 1, [config.batch_size, self.z_dim]).astype(np.float32)
-        
-        write_summary = ((np.mod(self.counter, 50) == 0) and (self.counter < 1000)) \
-                    or (np.mod(self.counter, 1000) == 0) or (self.err_counter > 0)
-#        write_summary = True
+
+    def train_step(self):
+        step = self.sess.run(self.global_step)
+        write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
+                    or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
+        write_summary = True
+        print('d, g = %d, %d' % (self.d_counter, self.g_counter))
         if self.config.use_kernel:
-            feed_dict = {self.lr: self.current_lr, self.z: batch_z}
-            if batch_images is not None:
-                feed_dict.update({self.images: batch_images})
-            eval_ops = [self.global_step, self.g_loss, self.d_loss]
-            if (self.config.kernel != '') and ('optme' not in self.config.model) and ('lsun' not in self.config.dataset):
-                feed_dict.update({self.me_test_images: self.additional_sample_images})
+            eval_ops = [self.g_loss, self.d_loss]
             if self.config.is_demo:
                 summary_str, step, g_loss, d_loss = self.sess.run(
-                    [self.TrainSummary] + eval_ops,
-                    feed_dict=feed_dict
+                    [self.TrainSummary] + eval_ops
                 )
             else:
                 if self.d_counter == 0:
                     if write_summary:
-                        _, summary_str, step, g_loss, d_loss = self.sess.run(
-                            [self.g_grads, self.TrainSummary] + eval_ops, 
-                            feed_dict=feed_dict
+                        _, summary_str, g_loss, d_loss = self.sess.run(
+                            [self.g_grads, self.TrainSummary] + eval_ops
                         )
                     else:
-                        _, step, g_loss, d_loss = self.sess.run(
-                            [self.g_grads] + eval_ops, 
-                            feed_dict=feed_dict
-                        )
+                        _, g_loss, d_loss = self.sess.run([self.g_grads] + eval_ops)
                 else:
-                    _, step, g_loss, d_loss = self.sess.run(
-                        [self.d_grads] + eval_ops, feed_dict=feed_dict
-                    )
+                    _, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
+            et = "[%2d] time: %4.4f" % (step, time.time() - self.start_time)
+            assert ~np.isnan(g_loss), "NaN g_loss, epoch: " + et
+            assert ~np.isnan(d_loss), "NaN d_loss, epoch: " + et              
         if self.d_counter == 0:
             if write_summary:
                 try:
                     self.writer.add_summary(summary_str, step)
                     self.err_counter = 0
                 except Exception as e:
-                    print('Step %d summary exception. ' % self.counter, e)
+                    print('Step %d summary exception. ' % step, e)
                     self.err_counter += 1
                     
                 print("Epoch: [%2d] time: %4.4f, %s, G: %.8f, D: %.8f"
-                    % (self.counter, time.time() - self.start_time, 
+                    % (step, time.time() - self.start_time, 
                        self.optim_name, g_loss, d_loss)) 
-            if (np.mod(self.counter, self.config.max_iteration//5) == 0):
-                self.current_lr *= self.config.decay_rate
-                print('current learning rate: %f' % self.current_lr)  
+            if (np.mod(step + 1, self.config.max_iteration//5) == 0):
+                self.lr *= self.config.decay_rate
+                print('current learning rate: %f' % self.sess.run(self.lr))
                 if ('decay_gp' in self.config.suffix) and (self.config.gradient_penalty > 0):
                     self.gp *= self.config.decay_rate
-                    print('current gradeint penalty: %f' % self.sess.run(self.gp))
+                    print('current gradient penalty: %f' % self.sess.run(self.gp))
                     
-        if self.counter == 1:
-            print('current learning rate: %f' % self.current_lr)
-        if self.d_grads is not None:
+        if (step == 1) and (self.d_counter == 0):
+            print('current learning rate: %f' % self.sess.run(self.lr))
+        if (self.g_counter == 0) and (self.d_grads is not None):
             d_steps = self.config.dsteps
-            if ((self.counter % 100 == 0) or (self.counter < 20)):
+            if ((step % 100 == 0) or (step < 20)):
                 d_steps = self.config.start_dsteps
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
-        self.counter += (self.d_counter == 0)
+        if self.d_counter == 0:
+            self.g_counter = (self.g_counter + 1) % self.config.gsteps
         
-        return g_loss, d_loss
+        return g_loss, d_loss, step
+    

@@ -13,24 +13,33 @@ _eps=1e-8
 ################################################################################
 ### Quadratic-time MMD with Gaussian RBF kernel
 
-def _Euclidean_kernel(X, Y, K_XY_only=False):
+def _distance_kernel(X, Y, K_XY_only=False):
     XX = tf.matmul(X, X, transpose_b=True)
     XY = tf.matmul(X, Y, transpose_b=True)
     YY = tf.matmul(Y, Y, transpose_b=True)
 
     X_sqnorms = tf.diag_part(XX)
-    Y_sqnorms = tf.diag_part(YY)    
+    Y_sqnorms = tf.diag_part(YY)
 
     r = lambda x: tf.expand_dims(x, 0)
     c = lambda x: tf.expand_dims(x, 1)
-    
-    K_XY = -(c(X_sqnorms) - 2 * XY + r(Y_sqnorms))
+
+    K_XY = c(tf.sqrt(X_sqnorms)) + r(tf.sqrt(Y_sqnorms)) + tf.sqrt(-2 * XY + c(X_sqnorms) + r(Y_sqnorms))
+
     if K_XY_only:
         return K_XY
-    
-    K_XX = -(c(X_sqnorms) - 2 * XX + r(X_sqnorms))
-    K_YY = -(c(Y_sqnorms) - 2 * YY + r(Y_sqnorms))
-    
+
+    K_XX = c(tf.sqrt(X_sqnorms)) + r(tf.sqrt(X_sqnorms)) + tf.sqrt(-2 * XX + c(X_sqnorms) + r(X_sqnorms))
+    K_YY = c(tf.sqrt(Y_sqnorms)) + r(tf.sqrt(Y_sqnorms)) + tf.sqrt(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))
+
+    return K_XX, K_XY, K_YY, False
+
+def _dot_kernel(X, Y, K_XY_only=False):
+    K_XY = tf.matmul(X, Y, transpose_b=True)
+    if K_XY_only:
+        return K_XY
+    K_XX = tf.matmul(X, X, transpose_b=True)
+    K_YY = tf.matmul(Y, Y, transpose_b=True)
     return K_XX, K_XY, K_YY, False
 
 def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, K_XY_only=False):
@@ -96,7 +105,7 @@ def _mix_rq_kernel(X, Y, alphas=[.001, .01, .1, 1.0, 10.0], wts=None, K_XY_only=
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
 
 
-def _mix_di_kernel(X, Y, z, alphas, wts=None):
+def _mix_di_kernel(X, Y, z, alphas, wts=None, K_XY_only=False):
     """
     distance - induced kernel
     k_{alpha,z}(x,x') = d^alpha(x, z) + d^alpha(x', z) - d^alpha(x, x')
@@ -123,14 +132,23 @@ def _mix_di_kernel(X, Y, z, alphas, wts=None):
 
     K_XX, K_XY, K_YY = 0, 0, 0
     for alpha, wt in zip(alphas, wts):
-#        p = lambda x: tf.exp(alpha * tf.log(x))
         p = lambda x: tf.pow(x, alpha)
-        
-        K_XX += wt * (p(d_Xz) + p(tf.transpose(d_Xz)) - p(c(X_sqnorms) + r(X_sqnorms) - 2 * XX))
         K_XY += wt * (p(d_Xz) + p(tf.transpose(d_Yz)) - p(c(X_sqnorms) + r(Y_sqnorms) - 2 * XY))
+
+    if K_XY_only:
+        return K_XY
+
+    for alpha, wt in zip(alphas, wts):
+        p = lambda x: tf.pow(x, alpha)
+        K_XX += wt * (p(d_Xz) + p(tf.transpose(d_Xz)) - p(c(X_sqnorms) + r(X_sqnorms) - 2 * XX))
         K_YY += wt * (p(d_Yz) + p(tf.transpose(d_Yz)) - p(c(Y_sqnorms) + r(Y_sqnorms) - 2 * YY))
 
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
+
+
+def distance_mmd2(X, Y, biased=True):
+    K_XX, K_XY, K_YY, d = _distance_kernel(X, Y)
+    return _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=biased)
 
 
 def rbf_mmd2(X, Y, sigma=1, biased=True):
@@ -151,8 +169,8 @@ def mix_di_mmd2(X, Y, z, alphas=(1,), wts=None, biased=True):
     K_XX, K_XY, K_YY, d = _mix_di_kernel(X, Y, z, alphas, wts)
     return _mmd2(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
 
-def Euclidean_mmd2(X, Y, biased=True):
-    K_XX, K_XY, K_YY = _Euclidean_kernel(X, Y)
+def dot_mmd2(X, Y, biased=True):
+    K_XX, K_XY, K_YY = _dot_kernel(X, Y)
     return _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=biased)
 
 def rbf_mmd2_and_ratio(X, Y, sigma=1, biased=True):
@@ -173,8 +191,8 @@ def mix_di_mmd2_and_ratio(X, Y, z, alphas=(1,), wts=None, biased=True):
     K_XX, K_XY, K_YY, d = _mix_di_kernel(X, Y, z, alphas, wts)
     return _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=d, biased=biased)
 
-def Euclidean_mmd2_and_ratio(X, Y, biased=True):
-    K_XX, K_XY, K_YY = _Euclidean_kernel(X, Y)
+def dot_mmd2_and_ratio(X, Y, biased=True):
+    K_XX, K_XY, K_YY = _dot_kernel(X, Y)
     return _mmd2_and_ratio(K_XX, K_XY, K_YY, const_diagonal=False, biased=biased)    
 ################################################################################
 ### Helper functions to compute variances based on kernel matrices
