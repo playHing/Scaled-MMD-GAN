@@ -23,14 +23,15 @@ def _distance_kernel(X, Y, K_XY_only=False):
 
     r = lambda x: tf.expand_dims(x, 0)
     c = lambda x: tf.expand_dims(x, 1)
+    mysqrt = lambda x: tf.sqrt(x + _eps)
 
-    K_XY = c(tf.sqrt(X_sqnorms)) + r(tf.sqrt(Y_sqnorms)) + tf.sqrt(-2 * XY + c(X_sqnorms) + r(Y_sqnorms))
+    K_XY = c(mysqrt(X_sqnorms)) + r(mysqrt(Y_sqnorms)) + mysqrt(-2 * XY + c(X_sqnorms) + r(Y_sqnorms))
 
     if K_XY_only:
         return K_XY
 
-    K_XX = c(tf.sqrt(X_sqnorms)) + r(tf.sqrt(X_sqnorms)) + tf.sqrt(-2 * XX + c(X_sqnorms) + r(X_sqnorms))
-    K_YY = c(tf.sqrt(Y_sqnorms)) + r(tf.sqrt(Y_sqnorms)) + tf.sqrt(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))
+    K_XX = c(mysqrt(X_sqnorms)) + r(mysqrt(X_sqnorms)) + mysqrt(-2 * XX + c(X_sqnorms) + r(X_sqnorms))
+    K_YY = c(mysqrt(Y_sqnorms)) + r(mysqrt(Y_sqnorms)) + mysqrt(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))
 
     return K_XX, K_XY, K_YY, False
 

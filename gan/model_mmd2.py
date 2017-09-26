@@ -19,6 +19,7 @@ import load
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from utils import save_images, unpickle, read_and_scale, center_and_scale, variable_summaries, conv_sizes, pp
 import pprint
+from mmd import _eps
 
 class MMD_GAN(object):
     def __init__(self, sess, config, is_crop=True,
@@ -116,11 +117,11 @@ class MMD_GAN(object):
         arch = '%dx%d' % (self.config.gf_dim, self.config.df_dim)
         if self.config.dataset == 'mnist':
             arch = 'cramer.sett'
-        self.description = ("%s%s_%s%s_%s%sd%d-%d_%s_%s_%s" % (
+        self.description = ("%s%s_%s%s_%s%sd%d-%d-%d_%s_%s_%s" % (
                     self.dataset_name, arch,
                     self.config.architecture, discriminator_desc,
                     self.config.kernel, dwc, self.config.dsteps,
-                    self.config.start_dsteps, self.batch_size, 
+                    self.config.start_dsteps, self.config.gsteps, self.batch_size,
                     self.output_size, lr))
         if self.config.batch_norm:
             self.description += '_bn'
@@ -152,7 +153,7 @@ class MMD_GAN(object):
                                                       self.z_dim)).astype(np.float32),
                                     dtype=tf.float32, name='sample_z')        
 
-        tf.summary.histogram("z", self.z)
+        # tf.summary.histogram("z", self.z)
 
         self.G = self.generator(self.z)
         self.sampler = self.generator(self.sample_z, is_train=False, reuse=True)
@@ -166,7 +167,7 @@ class MMD_GAN(object):
 
         self.set_loss(G, images)
 
-        block = min(8, int(np.sqrt(self.batch_size)))
+        block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
         tf.summary.image("train/input image", 
                          self.imageRearrange(tf.clip_by_value(self.images, 0, 1), block))
         tf.summary.image("train/gen image", 
@@ -199,13 +200,13 @@ class MMD_GAN(object):
             kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
         with tf.variable_scope('loss'):
             if self.config.model in ['mmd', 'mmd_gan']:
-                self.mmd_loss = tf.sqrt(MMD.mmd2(kernel(G, images)))
+                self.mmd_loss = tf.sqrt(MMD.mmd2(kernel(G, images)) + _eps)
                 self.optim_name = 'kernel_loss'
             elif self.config.model == 'tmmd':
                 kl, rl, var_est = MMD.mmd2_and_ratio(kernel(G, images))
-                self.mmd_loss = tf.sqrt(rl)
+                self.mmd_loss = tf.sqrt(rl + _eps)
                 self.optim_name = 'ratio_loss'
-                tf.summary.scalar("kernel_loss", tf.sqrt(kl))
+                tf.summary.scalar("kernel_loss", tf.sqrt(kl + _eps))
                 tf.summary.scalar("variance_estimate", var_est)
             
         self.add_gradient_penalty(kernel, G, images)
@@ -266,7 +267,7 @@ class MMD_GAN(object):
             else:
                 self.g_loss = self.mmd_loss
                 self.d_loss = -self.mmd_loss
-            variable_summaries([(gradients, 'dx_gradients')])
+            # variable_summaries([(gradients, 'dx_gradients')])
             tf.summary.scalar(self.optim_name + ' G', self.g_loss)
             tf.summary.scalar(self.optim_name + ' D', self.d_loss)
             tf.summary.scalar('dx_penalty', penalty)
@@ -337,7 +338,7 @@ class MMD_GAN(object):
         step = self.sess.run(self.global_step)
         write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
                 or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
-        write_summary=True
+        # write_summary=True
         if self.config.use_kernel:
             eval_ops = [self.g_gvs, self.d_gvs, self.g_loss, self.d_loss]
             if self.config.is_demo:
@@ -367,14 +368,14 @@ class MMD_GAN(object):
                 assert ~np.isnan(d_loss), "NaN d_loss, " + et
         # G STEP
         if self.d_counter == 0:
-            if write_summary:
+            if step % 10000 == 0:
                 try:
                     self.writer.add_summary(summary_str, step)
                     self.err_counter = 0
                 except Exception as e:
                     print('Step %d summary exception. ' % step, e)
                     self.err_counter += 1
-                
+            if write_summary:
                 print("Epoch: [%2d] time: %4.4f, %s, G: %.8f, D: %.8f, sum_grads: %.8f, %.8f"
                     % (step, time.time() - self.start_time, 
                        self.optim_name, g_loss, d_loss, sum_g_grad, sum_d_grad)) 
@@ -419,7 +420,7 @@ class MMD_GAN(object):
         else:
             print(" [!] Load failed...")
 
-    def set_input_pipeline(self):
+    def set_input_pipeline(self, streams=None):
         if self.config.dataset in ['mnist', 'cifar10']:
             path = os.path.join(self.data_dir, self.dataset_name)
             data_X, data_y = getattr(load, self.config.dataset)(path)
@@ -431,25 +432,41 @@ class MMD_GAN(object):
             self.G_config = G_config
         else:
             raise ValueError("not implemented dataset '%s'" % self.config.dataset)
-        
+        if streams is None:
+            streams = [self.batch_size, self.real_batch_size]
+        streams = np.cumsum(streams)
+        bs = streams[-1]
+
         queue = tf.train.input_producer(tf.constant(data_X.astype(np.float32)), 
                                                 shuffle=False)
-        single_sample = queue.dequeue_many(self.real_batch_size * 8)
-        single_sample.set_shape([self.real_batch_size * 8, self.output_size, self.output_size, self.c_dim])
+        single_sample = queue.dequeue_many(bs * 4)
+        single_sample.set_shape([bs * 4, self.output_size, self.output_size, self.c_dim])
         ims = tf.train.shuffle_batch(
             [single_sample], 
-            batch_size=self.batch_size + self.real_batch_size,
-            capacity=max(self.real_batch_size * 8, self.batch_size * 128),
-            min_after_dequeue=max(self.real_batch_size * 4, self.batch_size * 32),
+            batch_size=bs,
+            capacity=max(bs * 8, self.batch_size * 32),
+            min_after_dequeue=max(bs * 2, self.batch_size * 8),
             num_threads=4,
             enqueue_many=True
         )
-        self.images = ims[:self.real_batch_size]
-        self.images2 = ims[self.real_batch_size:]
+        # self.images2 = ims[streams[0]: streams[0] + streams[1]]
+        self.images = ims[:streams[0]]
+
+        for j in np.arange(1, len(streams)):
+            self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
         off = int(np.random.rand()*( data_X.shape[0] - self.batch_size*2))
         self.additional_sample_images = data_X[off: off + self.batch_size].astype(np.float32)
+
+        # with tf.Session() as sess:
+        #     print('images2.shape = ' + repr(sess.run(self.images2).shape))
+            # print('images.shape = ' + repr(sess.run(self.images).shape))
             
-    def set_lmdb_pipeline(self):
+    def set_lmdb_pipeline(self, streams=None):
+        if streams is None:
+            streams = [self.batch_size, self.real_batch_size]
+        streams = np.cumsum(streams)
+        bs = streams[-1]
+
         self.start_time = time.time()
         data_dir = os.path.join(self.data_dir, self.dataset_name)
         keys = []
@@ -503,14 +520,16 @@ class MMD_GAN(object):
 #                                            min_after_dequeue=read_batch//2,
 #                                            num_threads=2,
 #                                            enqueue_many=True)
-        ims = tf.train.shuffle_batch([single_sample], self.batch_size + self.real_batch_size,
-                                            capacity=read_batch * 4, 
-                                            min_after_dequeue=read_batch//2,
+        ims = tf.train.shuffle_batch([single_sample], bs,
+                                            capacity=max(bs * 8, read_batch * 4),
+                                            min_after_dequeue=max(bs * 2, read_batch//2),
                                             num_threads=2,
                                             enqueue_many=True)
         
-        self.images = ims[:self.real_batch_size]
-        self.images2 = ims[self.real_batch_size:]
+        self.images = ims[:streams[0]]
+        for j in np.arange(1, len(streams)):
+            self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
+        off = int(np.random.rand()*( data_X.shape[0] - self.batch_size*2))
         
     def train(self):    
         self.train_init()
@@ -561,8 +580,8 @@ class MMD_GAN(object):
     def discriminator(self, image, y=None, reuse=False, batch_size=None):
         if batch_size is None:
             batch_size = self.batch_size
-        if self.config.dataset == 'mnist':
-            return self.discriminator_mnist(image, reuse=reuse)
+        # if self.config.dataset == 'mnist':
+        #     return self.discriminator_mnist(image, reuse=reuse)
         with tf.variable_scope("discriminator") as scope:
             if reuse:
                 scope.reuse_variables()
@@ -582,30 +601,43 @@ class MMD_GAN(object):
                 h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, k_h=4, k_w=4, name='d_h2_conv')))
                 h3 = conv2d(h2, self.df_dim, d_h=4, d_w=4, k_h=4, k_w=4, name='d_h3_conv')
                 hF = tf.reshape(h3, [batch_size, self.df_dim])
+                self.df_out_dim = self.df_dim
             elif self.config.architecture == 'dcold':
                 h0 = lrelu(conv2d(image, self.df_dim//8, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim//4, name='d_h1_conv')))
                 h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim//2, name='d_h2_conv')))
                 h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim, name='d_h3_conv')))
                 hF = linear(tf.reshape(h3, [batch_size, -1]), self.df_dim, 'd_h4_lin')
+                self.df_out_dim = self.df_dim
             elif self.config.architecture == 'dcgan':
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
                 h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
                 h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
                 hF = linear(tf.reshape(h3, [batch_size, -1]), self.df_dim * 8, 'd_h4_lin')
+                self.df_out_dim = self.df_dim * 8
             elif self.config.architecture == 'dcgan16':
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
                 h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
                 h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
                 hF = linear(tf.reshape(h3, [batch_size, -1]), 16, 'd_h4_lin')
+                self.df_out_dim = 16
             elif self.config.architecture == 'dcgan1':
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
                 h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
                 h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
                 hF = linear(tf.reshape(h3, [batch_size, -1]), 1, 'd_h4_lin')
+                self.df_out_dim = 1
+            elif self.config.architecture == 'dc64':
+                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
+                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
+                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
+                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
+                h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
+                hF = linear(tf.reshape(h4, [batch_size, -1]), self.df_dim * 16, 'd_h6_lin')
+                self.df_out_dim = self.df_dim * 16
             elif self.config.architecture == 'dc128':
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
@@ -614,6 +646,7 @@ class MMD_GAN(object):
                 h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
                 h5 = lrelu(self.d_bn5(conv2d(h4, self.df_dim * 32, name='d_h5_conv')))
                 hF = linear(tf.reshape(h5, [batch_size, -1]), self.df_dim * 32, 'd_h6_lin')
+                self.df_out_dim = self.df_dim * 32
                 #            h3 = lrelu(linear(tf.reshape(h2, [batch_size, -1]), self.df_dim*4, 'd_h2_lin'))
     #            h4 = linear(h3, self.df_dim, 'd_h3_lin')
             else:
@@ -635,7 +668,7 @@ class MMD_GAN(object):
             fc2 = tf.layers.dense(fc1, 256, name='d_h3_lin')
             return fc2
 
-    def generator_mnist(self, z, is_train=True, reuse=False):
+    def generator_mnist(self, z, is_train=True, reuse=False, batch_size=None):
 #        if self.config.architecture == 'dc':
 #            return self.generator(z, is_train=is_train, reuse=reuse)
         with tf.variable_scope('generator') as vs:
@@ -644,7 +677,7 @@ class MMD_GAN(object):
             fc1 = tf.layers.dense(z, 1024, name='g_h01_lin')
             fc1 = tf.nn.relu(fc1)
             fc2 = tf.layers.dense(fc1, 7 * 7 * 128, name='g_h1_lin')
-            fc2 = tf.reshape(fc2, tf.stack([self.batch_size, 7, 7, 128]))
+            fc2 = tf.reshape(fc2, [batch_size, 7, 7, 128])
             fc2 = tf.nn.relu(fc2)
             conv1 = tf.contrib.layers.conv2d_transpose(fc2, 64, [4, 4], [2, 2], scope='g_h2_conv')
             conv1 = tf.nn.relu(conv1)
@@ -671,8 +704,8 @@ class MMD_GAN(object):
             batch_size = self.batch_size
         if self.config.dataset not in ['mnist', 'cifar10', 'lsun', 'GaussianMix']:
             raise ValueError("not implemented dataset '%s'" % self.config.dataset)
-        if self.config.dataset == 'mnist':
-            return self.generator_mnist(z, is_train=is_train, reuse=reuse)
+        # if self.config.dataset == 'mnist':
+        #     return self.generator_mnist(z, is_train=is_train, reuse=reuse, batch_size=batch_size)
         elif self.config.dataset in ['lsun', 'cifar10']:
             if self.config.architecture == 'mlp':
                 return self.MLP_generator(z, is_train=is_train, reuse=reuse)
@@ -681,7 +714,7 @@ class MMD_GAN(object):
                 scope.reuse_variables()
             s1, s2, s4, s8, s16 = conv_sizes(self.output_size, layers=4, stride=2)
             if self.config.architecture == 'dfc':
-                z_ = tf.reshape(z, [batch_size, 1, 1, self.z_dim])
+                z_ = tf.reshape(z, [batch_size, 1, 1, -1])
                 h0 = tf.nn.relu(self.g_bn0(deconv2d(z_, 
                     [batch_size, s8, s8, self.gf_dim * 4], name='g_h0_conv',
                     k_h=4, k_w=4, d_h=4, d_w=4)))
@@ -690,8 +723,8 @@ class MMD_GAN(object):
                 h2 = tf.nn.relu(self.g_bn2(deconv2d(h1, 
                     [batch_size, s2, s2, self.gf_dim], name='g_h2_conv', k_h=4, k_w=4)))
                 h3 = deconv2d(h2, [batch_size, s1, s1, self.c_dim], name='g_h3_conv', k_h=4, k_w=4)
-                with tf.name_scope('G_outputs'):
-                    variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'), (h3, 'h3')])
+                # with tf.name_scope('G_outputs'):
+                    # variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'), (h3, 'h3')])
                 return tf.nn.sigmoid(h3)
             elif self.config.architecture == 'dcold':
                 # project `z` and reshape
@@ -714,16 +747,16 @@ class MMD_GAN(object):
                 
                 h4, self.h4_w, self.h4_b = deconv2d(
                     h3, [batch_size, s1, s1, self.c_dim], name='g_h4', with_w=True)
-                with tf.name_scope('G_outputs'):
-                    variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'), 
-                                        (h3, 'h3'), 
-                                        (h4, 'h4')])
+                # with tf.name_scope('G_outputs'):
+                    # variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'),
+                    #                     (h3, 'h3'),
+                    #                     (h4, 'h4')])
                 return tf.nn.sigmoid(h4)
             elif self.config.architecture in ['dcgan', 'dcgan16']:
                 # project `z` and reshape
-                z_= linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin')
+                z_ = linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin')
                 
-                h0 = tf.reshape(z_, [-1, s16, s16, self.gf_dim * 8])
+                h0 = tf.reshape(z_, [batch_size, s16, s16, self.gf_dim * 8])
                 h0 = tf.nn.relu(self.g_bn0(h0))
                 
                 h1 = deconv2d(h0, [batch_size, s8, s8, self.gf_dim*4], name='g_h1')
@@ -736,22 +769,44 @@ class MMD_GAN(object):
                 h3 = tf.nn.relu(self.g_bn3(h3))
                 
                 h4 = deconv2d(h3, [batch_size, s1, s1, self.c_dim], name='g_h4')
-                with tf.name_scope('G_outputs'):
-                    variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'), 
-                                        (h3, 'h3'), 
-                                        (h4, 'h4')])
+                # with tf.name_scope('G_outputs'):
+                    # variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'),
+                    #                     (h3, 'h3'),
+                    #                     (h4, 'h4')])
                 return tf.nn.sigmoid(h4)
+            elif self.config.architecture == 'dc64':
+                s1, s2, s4, s8, s16, s32 = conv_sizes(self.output_size, layers=5, stride=2)
+                # project `z` and reshape
+                z_= linear(z, self.gf_dim*16*s32*s32, 'g_h0_lin')
+                
+                h0 = tf.reshape(z_, [-1, s32, s32, self.gf_dim * 16])
+                h0 = tf.nn.relu(self.g_bn0(h0))
+                
+                h1 = deconv2d(h0, [batch_size, s16, s16, self.gf_dim*8], name='g_h1')
+                h1 = tf.nn.relu(self.g_bn1(h1))
+                                
+                h2 = deconv2d(h1, [batch_size, s8, s8, self.gf_dim*4], name='g_h2')
+                h2 = tf.nn.relu(self.g_bn2(h2))
+
+                h3 = deconv2d(h2, [batch_size, s4, s4, self.gf_dim*2], name='g_h3')
+                h3 = tf.nn.relu(self.g_bn3(h3))
+
+                h4 = deconv2d(h3, [batch_size, s2, s2, self.gf_dim], name='g_h4')
+                h4 = tf.nn.relu(self.g_bn4(h4))                
+                
+                h5 = deconv2d(h4, [batch_size, s1, s1, self.c_dim], name='g_h5')
+                return tf.nn.sigmoid(h5)
             elif self.config.architecture == 'dc128':
                 s1, s2, s4, s8, s16, s32, s64 = conv_sizes(self.output_size, layers=6, stride=2)
                 # project `z` and reshape
                 z_= linear(z, self.gf_dim*32*s64*s64, 'g_h0_lin')
-                
+
                 h0 = tf.reshape(z_, [-1, s64, s64, self.gf_dim * 32])
                 h0 = tf.nn.relu(self.g_bn0(h0))
-                
+
                 h1 = deconv2d(h0, [batch_size, s32, s32, self.gf_dim*16], name='g_h1')
                 h1 = tf.nn.relu(self.g_bn1(h1))
-                                
+
                 h2 = deconv2d(h1, [batch_size, s16, s16, self.gf_dim*8], name='g_h2')
                 h2 = tf.nn.relu(self.g_bn2(h2))
 
@@ -759,16 +814,16 @@ class MMD_GAN(object):
                 h3 = tf.nn.relu(self.g_bn3(h3))
 
                 h4 = deconv2d(h3, [batch_size, s4, s4, self.gf_dim*2], name='g_h4')
-                h4 = tf.nn.relu(self.g_bn4(h4))                
-                
+                h4 = tf.nn.relu(self.g_bn4(h4))
+
                 h5 = deconv2d(h4, [batch_size, s2, s2, self.gf_dim*1], name='g_h5')
                 h5 = tf.nn.relu(self.g_bn5(h5))
-                
+
                 h6 = deconv2d(h5, [batch_size, s1, s1, self.c_dim], name='g_h6')
-                with tf.name_scope('G_outputs'):
-                    variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'), 
-                                        (h3, 'h3'), (h4, 'h4'), (h5, 'h5'),
-                                        (h6, 'h6')])
+                # with tf.name_scope('G_outputs'):
+                    # variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'),
+                    #                     (h3, 'h3'), (h4, 'h4'), (h5, 'h5'),
+                    #                     (h6, 'h6')])
                 return tf.nn.sigmoid(h6)
 
             

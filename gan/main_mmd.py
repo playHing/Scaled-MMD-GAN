@@ -77,6 +77,8 @@ def main(_):
         from model_mmd2 import MMD_GAN as model
     elif (FLAGS.model == 'me') or ('optme' in FLAGS.model):
         from model_me2 import ME_GAN as model
+    elif FLAGS.model == 'me_brb':
+        from model_me_brb import MEbrb_GAN as model
     elif FLAGS.model == 'gan':
         from model_gan import GAN as model
     elif FLAGS.model == 'wgan_gp':

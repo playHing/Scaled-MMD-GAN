@@ -139,8 +139,8 @@ class ME_GAN(MMD_GAN):
         step = self.sess.run(self.global_step)
         write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
                     or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
-        write_summary = True
-        print('d, g = %d, %d' % (self.d_counter, self.g_counter))
+        # write_summary = True
+        # print('d, g = %d, %d' % (self.d_counter, self.g_counter))
         if self.config.use_kernel:
             eval_ops = [self.g_loss, self.d_loss]
             if self.config.is_demo:
