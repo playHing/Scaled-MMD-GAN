@@ -1,4 +1,5 @@
 import mmd as MMD
+from mmd import _eps
 
 from model_mmd2 import MMD_GAN, tf, np
 from model_me2 import ME_GAN
@@ -97,9 +98,9 @@ class MEbrb_GAN(ME_GAN):
 
         self.optim_name = self.config.kernel + ' kernel mean embedding brb loss'
         with tf.variable_scope('loss'):
-            self.g_loss = tf.norm(diff) / self.config.test_locations
+            self.g_loss = tf.sqrt(_eps + tf.reduce_sum(tf.square(diff))) / self.config.test_locations
             Z = diff * self.batch_size
-            self.d_loss = -tf.norm(self.mu_real - mu_fake) / self.config.test_locations
+            self.d_loss = -tf.sqrt(_eps + tf.reduce_sum(tf.square(self.mu_real - mu_fake))) / self.config.test_locations
 
         self.d_loss_value, self.g_loss_value = np.inf, np.inf
     #     if 'full_gp' in self.config.suffix:

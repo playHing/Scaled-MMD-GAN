@@ -111,12 +111,12 @@ class MMD_GAN(object):
         d_clip = self.config.discriminator_weight_clip
         dwc = ('_dwc_%f' % d_clip) if (d_clip > 0) else ''
         if self.config.learning_rate_D == self.config.learning_rate:
-            lr = 'lr%f' % self.config.learning_rate
+            lr = 'lr%.8f' % self.config.learning_rate
         else:
-            lr = 'lr%fG%fD' % (self.config.learning_rate, self.config.learning_rate_D)
+            lr = 'lr%.8fG%fD' % (self.config.learning_rate, self.config.learning_rate_D)
         arch = '%dx%d' % (self.config.gf_dim, self.config.df_dim)
-        if self.config.dataset == 'mnist':
-            arch = 'cramer.sett'
+        # if self.config.dataset == 'mnist':
+        #     arch = 'cramer.sett'
         self.description = ("%s%s_%s%s_%s%sd%d-%d-%d_%s_%s_%s" % (
                     self.dataset_name, arch,
                     self.config.architecture, discriminator_desc,
@@ -131,10 +131,12 @@ class MMD_GAN(object):
             if not os.path.exists(sample_dir):
                 os.makedirs(sample_dir)
             self.old_stdout = sys.stdout
+            self.old_stderr = sys.stderr
             self.log_file = open(os.path.join(sample_dir, 'log.txt'), 'w', buffering=1)
             print('Execution start time: %s' % time.ctime())
             print('Log file: %s' % self.log_file)
-            sys.stdout = self.log_file        
+            sys.stdout = self.log_file
+            sys.stderr = self.log_file
         print('Execution start time: %s' % time.ctime())
         pprint.PrettyPrinter().pprint(self.config.__dict__['__flags'])
         self.build_model()
@@ -529,7 +531,6 @@ class MMD_GAN(object):
         self.images = ims[:streams[0]]
         for j in np.arange(1, len(streams)):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
-        off = int(np.random.rand()*( data_X.shape[0] - self.batch_size*2))
         
     def train(self):    
         self.train_init()
