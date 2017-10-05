@@ -19,7 +19,7 @@ import load
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from utils import save_images, unpickle, read_and_scale, center_and_scale, variable_summaries, conv_sizes, pp
 import pprint
-from mmd import _eps
+from mmd import _eps, _check_numerics
 
 class MMD_GAN(object):
     def __init__(self, sess, config, is_crop=True,
@@ -42,6 +42,7 @@ class MMD_GAN(object):
             dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
+        self.check_numerics = _check_numerics
         self.sess = sess
         if config.architecture == 'dc128':
             output_size = 128
@@ -158,6 +159,8 @@ class MMD_GAN(object):
         # tf.summary.histogram("z", self.z)
 
         self.G = self.generator(self.z)
+        if self.check_numerics:
+            self.G = tf.check_numerics(self.G, 'self.G')
         self.sampler = self.generator(self.sample_z, is_train=False, reuse=True)
         
         if self.config.dc_discriminator:
@@ -183,6 +186,9 @@ class MMD_GAN(object):
         self.saver = tf.train.Saver(max_to_keep=2)
 
     def set_loss(self, G, images):
+        if self.check_numerics:
+            G = tf.check_numerics(G, 'G')
+            images = tf.check_numerics(images, 'images')
         if self.config.kernel == 'di': # Distance - induced kernel
             self.di_kernel_z_images = tf.constant(
                 self.additional_sample_images,
@@ -200,15 +206,18 @@ class MMD_GAN(object):
                     gg, ii, self.di_kernel_z, alphas=alphas, K_XY_only=K_XY_only)
         else:
             kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
+            
+        kerGI = kernel(G, images)
         with tf.variable_scope('loss'):
             if self.config.model in ['mmd', 'mmd_gan']:
-                self.mmd_loss = tf.sqrt(MMD.mmd2(kernel(G, images)) + _eps)
+#                with tf.control_dependencies([tf.assert_greater_equal(kerGI, 0.)]):
+                self.mmd_loss = MMD.mmd2(kerGI)#tf.check_numerics(tf.sqrt(kerGI + _eps), 'mmd_loss')
                 self.optim_name = 'kernel_loss'
             elif self.config.model == 'tmmd':
-                kl, rl, var_est = MMD.mmd2_and_ratio(kernel(G, images))
-                self.mmd_loss = tf.sqrt(rl + _eps)
+                kl, rl, var_est = MMD.mmd2_and_ratio(kerGI)
+                self.mmd_loss = rl# tf.check_numerics(tf.sqrt(rl + _eps), 'mmd_loss TMMD')
                 self.optim_name = 'ratio_loss'
-                tf.summary.scalar("kernel_loss", tf.sqrt(kl + _eps))
+                tf.summary.scalar("kernel_loss", kl)#tf.sqrt(kl + _eps))
                 tf.summary.scalar("variance_estimate", var_est)
             
         self.add_gradient_penalty(kernel, G, images)
@@ -233,19 +242,27 @@ class MMD_GAN(object):
             gradients = tf.gradients(witness, [x_hat])[0]
         elif self.config.gp_type == 'data_space':
             alpha = tf.reshape(alpha, [self.batch_size, 1, 1, 1])
-#            real_data = self.images #before discirminator
-#            fake_data = self.G #before discriminator
-            real_data = self.images2
-            fake_data = self.generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1., 
-                                                             maxval=1., dtype=tf.float32), reuse=True)
+            real_data = self.images #before discirminator
+            fake_data = self.G #before discriminator
+#            real_data = self.images2
+#            fake_data = self.generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1., 
+#                                                             maxval=1., dtype=tf.float32), reuse=True)
             x_hat_data = (1. - alpha) * real_data + alpha * fake_data
+            if self.check_numerics:
+                x_hat_data = tf.check_numerics(x_hat_data, 'x_hat_data')
             x_hat = self.discriminator(x_hat_data, reuse=True)
+            if self.check_numerics:
+                x_hat = tf.check_numerics(x_hat, 'x_hat')
             Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
             witness = Ekx(real) - Ekx(fake)
+            if self.check_numerics:
+                witness = tf.check_numerics(witness, 'witness')
 #            Ekxreal = kernel(x_hat, real, K_XY_only=True)
 #            Ekxfake = kernel(x_hat, fake, K_XY_only=True)
 #            witness = 1/(self.batch_size - 1) * tf.reduce_sum()
             gradients = tf.gradients(witness, [x_hat_data])[0]
+            if self.check_numerics:
+                gradients = tf.check_numerics(gradients, 'gradients 0')
         elif self.config.gp_type == 'wgan':
             alpha = tf.reshape(alpha, [self.batch_size, 1, 1, 1])
             real_data = self.images #before discirminator
@@ -253,10 +270,14 @@ class MMD_GAN(object):
             x_hat_data = (1. - alpha) * real_data + alpha * fake_data
             x_hat = self.discriminator(x_hat_data, reuse=True)
             gradients = tf.gradients(x_hat, [x_hat_data])[0]
+        
+        if self.check_numerics:
+#            gradients = tf.check_numerics(tf.clip_by_norm(gradients, 100.), 'gradients F')    
+            penalty = tf.check_numerics(tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0)), 'penalty')
+        else:
+#            gradients = tf.clip_by_norm(gradients, 100.) 
+            penalty = tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0))#
 
-        gradients = tf.clip_by_norm(gradients, 100.)
-        penalty = tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0))
-        #penalty = tf.square(tf.norm(gradients) - 1.0)
         
         print('adding gradient penalty')
         with tf.variable_scope('loss'):
@@ -283,6 +304,8 @@ class MMD_GAN(object):
             )    
 #            if self.config.gradient_penalty == 0:        
             self.g_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.g_gvs]
+            # self.g_gvs = [(tf.clip_by_norm(tf.check_numerics(gg, 'g_gvs ' + repr(gg.shape) + ', ' + repr(gg.name) + ', ' + repr(vv.name))
+            #                                , 1.), tf.check_numerics(vv, 'g_gvs vv')) for gg, vv in self.g_gvs]
 #            variable_summaries([(gg, 'd.%s.' % vv.op.name[10:]) for gg, vv in self.g_gvs])
             self.g_grads = self.g_kernel_optim.apply_gradients(
                 self.g_gvs, 
@@ -301,6 +324,8 @@ class MMD_GAN(object):
                 # negative gradients not needed - by definition d_loss = -optim_loss
 #                if self.config.gradient_penalty == 0: 
                 self.d_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
+                # self.d_gvs = [(tf.clip_by_norm(tf.check_numerics(gg, 'd_gvs ' + repr(gg.shape) + ', ' + repr(gg.name) + ', ' + repr(vv.name))
+                #                                , 1.), tf.check_numerics(vv, 'd_gvs vv')) for gg, vv in self.d_gvs]
 #                variable_summaries([(dd, 'd.%s.' % vv.op.name[14:]) for dd, vv in self.d_gvs])
                 self.d_grads = self.d_kernel_optim.apply_gradients(self.d_gvs) # minimizes self.d_loss <==> max MMD
                 dclip = self.config.discriminator_weight_clip
@@ -472,7 +497,7 @@ class MMD_GAN(object):
         self.start_time = time.time()
         data_dir = os.path.join(self.data_dir, self.dataset_name)
         keys = []
-        read_batch = max(10000, self.real_batch_size * 2)
+        read_batch = max(10000, self.real_batch_size * 20)
         # getting keys in database
         env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
         with env.begin() as txn:
@@ -525,7 +550,7 @@ class MMD_GAN(object):
         ims = tf.train.shuffle_batch([single_sample], bs,
                                             capacity=max(bs * 8, read_batch * 4),
                                             min_after_dequeue=max(bs * 2, read_batch//2),
-                                            num_threads=2,
+                                            num_threads=16,
                                             enqueue_many=True)
         
         self.images = ims[:streams[0]]
@@ -624,6 +649,13 @@ class MMD_GAN(object):
                 h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
                 hF = linear(tf.reshape(h3, [batch_size, -1]), 16, 'd_h4_lin')
                 self.df_out_dim = 16
+            elif self.config.architecture == 'dcgan64':
+                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
+                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
+                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
+                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
+                hF = linear(tf.reshape(h3, [batch_size, -1]), 64, 'd_h4_lin')
+                self.df_out_dim = 64               
             elif self.config.architecture == 'dcgan1':
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
@@ -651,7 +683,7 @@ class MMD_GAN(object):
                 #            h3 = lrelu(linear(tf.reshape(h2, [batch_size, -1]), self.df_dim*4, 'd_h2_lin'))
     #            h4 = linear(h3, self.df_dim, 'd_h3_lin')
             else:
-                raise ValueError("Choose architecture from  [dfc, dcold, dcgan, dcgan16, dc128]")
+                raise ValueError("Choose architecture from  [dfc, dcold, dcgan, dcgan16, scgan1, dcgan64, dc64, dc128]")
             return hF
 
     def discriminator_mnist(self, x, reuse=False):
@@ -753,7 +785,7 @@ class MMD_GAN(object):
                     #                     (h3, 'h3'),
                     #                     (h4, 'h4')])
                 return tf.nn.sigmoid(h4)
-            elif self.config.architecture in ['dcgan', 'dcgan16']:
+            elif self.config.architecture in ['dcgan', 'dcgan1', 'dcgan16', 'dcgan64']:
                 # project `z` and reshape
                 z_ = linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin')
                 

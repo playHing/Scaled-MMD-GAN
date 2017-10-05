@@ -8,7 +8,8 @@ import tensorflow as tf
 from tf_ops import dot, sq_sum
 
 
-_eps=1e-8
+_eps=1e-5
+_check_numerics=False
 
 ################################################################################
 ### Quadratic-time MMD with Gaussian RBF kernel
@@ -58,52 +59,82 @@ def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, K
     c = lambda x: tf.expand_dims(x, 1)
 
     K_XX, K_XY, K_YY = 0, 0, 0
+    
+    XYsqnorm = -2 * XY + c(X_sqnorms) + r(Y_sqnorms)
     for sigma, wt in zip(sigmas, wts):
         gamma = 1 / (2 * sigma**2)
-        K_XY += wt * tf.exp(-gamma * (-2 * XY + c(X_sqnorms) + r(Y_sqnorms)))
+        K_XY += wt * tf.exp(-gamma * XYsqnorm)
     
     if K_XY_only:
         return K_XY
     
+    XXsqnorm = -2 * XX + c(X_sqnorms) + r(X_sqnorms)
+    YYsqnorm = -2 * YY + c(Y_sqnorms) + r(Y_sqnorms)
     for sigma, wt in zip(sigmas, wts):
         gamma = 1 / (2 * sigma**2)
-        K_XX += wt * tf.exp(-gamma * (-2 * XX + c(X_sqnorms) + r(X_sqnorms)))
-        K_YY += wt * tf.exp(-gamma * (-2 * YY + c(Y_sqnorms) + r(Y_sqnorms)))
+        K_XX += wt * tf.exp(-gamma * XXsqnorm)
+        K_YY += wt * tf.exp(-gamma * YYsqnorm)
 
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
 
 
-def _mix_rq_kernel(X, Y, alphas=[.001, .01, .1, 1.0, 10.0], wts=None, K_XY_only=False):
+def _mix_rq_kernel(X, Y, alphas=[.001, .01, .1, 1.0, 10.0], wts=None, 
+                   K_XY_only=False, check_numerics=_check_numerics):
     """
     Rational quadratic kernel
     http://www.cs.toronto.edu/~duvenaud/cookbook/index.html
     """
     if wts is None:
-        wts = [1] * len(alphas)
+        wts = [1.] * len(alphas)
 
     XX = tf.matmul(X, X, transpose_b=True)
     XY = tf.matmul(X, Y, transpose_b=True)
     YY = tf.matmul(Y, Y, transpose_b=True)
+    if check_numerics:
+        XX = tf.check_numerics(XX, 'XX')
+        XY = tf.check_numerics(XY, 'XY')
+        YY = tf.check_numerics(YY, 'YY')
 
     X_sqnorms = tf.diag_part(XX)
     Y_sqnorms = tf.diag_part(YY)
 
     r = lambda x: tf.expand_dims(x, 0)
     c = lambda x: tf.expand_dims(x, 1)
-
-    K_XX, K_XY, K_YY = 0, 0, 0
+    
+    K_XX, K_XY, K_YY = 0., 0., 0.
+    
+    XYsqnorm = tf.maximum(-2. * XY + c(X_sqnorms) + r(Y_sqnorms), 0.)
     
     for alpha, wt in zip(alphas, wts):
-        K_XY += wt * tf.exp(-alpha * tf.log(1 + (-2 * XY + c(X_sqnorms) + r(Y_sqnorms))/(2*alpha)))
+        logXY = tf.log(1. + XYsqnorm/(2.*alpha))
+        if check_numerics:
+            logXY = tf.check_numerics(logXY, 'K_XY_log %f' % alpha)
+        K_XY += wt * tf.exp(-alpha * logXY)
         
+    if check_numerics:
+        K_XY = tf.check_numerics(K_XY, 'rq K_XY')
+
     if K_XY_only:
         return K_XY
     
+    XXsqnorm = tf.maximum(-2. * XX + c(X_sqnorms) + r(X_sqnorms), 0.)
+    YYsqnorm = tf.maximum(-2. * YY + c(Y_sqnorms) + r(Y_sqnorms), 0.)
+    
     for alpha, wt in zip(alphas, wts):
-        K_XX += wt * tf.exp(-alpha * tf.log(1 + (-2 * XX + c(X_sqnorms) + r(X_sqnorms))/(2*alpha)))
-        K_YY += wt * tf.exp(-alpha * tf.log(1 + (-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))/(2*alpha)))
+        logXX = tf.log(1. + XXsqnorm/(2.*alpha))
+        logYY = tf.log(1. + YYsqnorm/(2.*alpha))
+        if tf.check_numerics:
+            logXX = tf.check_numerics(logXX, 'K_XX_log %f' % alpha)
+            logYY = tf.check_numerics(logYY, 'K_YY_log %f' % alpha)
+        K_XX += wt * tf.exp(-alpha * logXX)
+        K_YY += wt * tf.exp(-alpha * logYY)
 
-    return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
+    if check_numerics:
+        K_XX = tf.check_numerics(K_XX, 'rq K_XX')
+        K_YY = tf.check_numerics(K_YY, 'rq K_YY')
+    # wts = tf.reduce_sum(tf.cast(wts, tf.float32))
+    wts = tf.reduce_sum(tf.cast(wts, tf.float32))
+    return K_XX, K_XY, K_YY, wts
 
 
 def _mix_di_kernel(X, Y, z, alphas, wts=None, K_XY_only=False):
@@ -201,7 +232,7 @@ def dot_mmd2_and_ratio(X, Y, biased=True):
 
 def mmd2(K, biased=False):
     K_XX, K_XY, K_YY, const_diagonal = K
-    return _mmd2(K_XX, K_XY, K_YY, const_diagonal, biased)
+    return _mmd2(K_XX, K_XY, K_YY, const_diagonal, biased) # numerics checked at _mmd2 return
     
 def _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
     m = tf.cast(K_XX.get_shape()[0], tf.float32)
@@ -224,7 +255,7 @@ def _mmd2(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
               + (tf.reduce_sum(K_YY) - trace_Y) / (n * (n - 1))
               - 2 * tf.reduce_sum(K_XY) / (m * n))
 
-    return mmd2
+    return mmd2 #tf.check_numerics(mmd2, '_mmd2 F')#
 
 def mmd2_and_ratio(K, biased=False, min_var_est=_eps):
     K_XX, K_XY, K_YY, const_diagonal = K
