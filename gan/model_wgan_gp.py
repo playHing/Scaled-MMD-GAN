@@ -23,9 +23,11 @@ from utils import save_images, unpickle, read_and_scale, center_and_scale, varia
 import pprint
 
 class GAN(MMD_GAN):
+    def __init__(self, sess, config, **kwargs):
+        config.dof_dim = 1
+        super(GAN, self).__init__(sess, config, **kwargs)
         
     def set_loss(self, G, images):
-        assert self.config.architecture == 'dcgan1', 'Discriminator must return a single feature.'
         alpha = tf.random_uniform(shape=[self.batch_size, 1, 1, 1])
         real_data = self.images
         fake_data = self.G

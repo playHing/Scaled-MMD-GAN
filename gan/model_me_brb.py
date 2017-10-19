@@ -24,31 +24,31 @@ class MEbrb_GAN(ME_GAN):
                                                       self.z_dim)).astype(np.float32),
                                     dtype=tf.float32, name='sample_z')
 
-        G = self.generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1.,
-                                                  maxval=1., dtype=tf.float32, name='z'))
-        G2 = self.generator(tf.random_uniform([self.config.test_locations // 2, self.z_dim], minval=-1.,
-                                                   maxval=1., dtype=tf.float32, name='z2'),
+        self.G = self.generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1.,
+                                                   maxval=1., dtype=tf.float32, name='z'))
+        self.G2 = self.generator(tf.random_uniform([self.config.test_locations // 2, self.z_dim], minval=-1.,
+                                                    maxval=1., dtype=tf.float32, name='z2'),
                             reuse=True, batch_size=self.config.test_locations // 2)
         self.sampler = self.generator(self.sample_z, is_train=False, reuse=True)
 
         if self.config.dc_discriminator:
             images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
             images2 = self.discriminator(self.images2, reuse=True, batch_size=self.config.test_locations // 2)
-            dG2 = self.discriminator(G2, reuse=True, batch_size=self.config.test_locations // 2)
-            dG = self.discriminator(G, reuse=True)
+            G2 = self.discriminator(self.G2, reuse=True, batch_size=self.config.test_locations // 2)
+            G = self.discriminator(self.G, reuse=True)
         else:
             images = tf.reshape(self.images, [self.real_batch_size, -1])
             images2 = tf.reshape(self.images2, [self.config.test_locations // 2, -1])
-            dG = tf.reshape(G, [self.batch_size, -1])
-            dG2 = tf.reshape(G2, [self.config.test_locations // 2, -1])
+            G = tf.reshape(self.G, [self.batch_size, -1])
+            G2 = tf.reshape(self.G2, [self.config.test_locations // 2, -1])
 
-        self.set_loss(dG, dG2, images, images2)
+        self.set_loss(G, G2, images, images2)
 
         block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
         tf.summary.image("train/input image",
                          self.imageRearrange(tf.clip_by_value(self.images, 0, 1), block))
         tf.summary.image("train/gen image",
-                         self.imageRearrange(tf.clip_by_value(G, 0, 1), block))
+                         self.imageRearrange(tf.clip_by_value(self.G, 0, 1), block))
 
         t_vars = tf.trainable_variables()
 
@@ -80,9 +80,9 @@ class MEbrb_GAN(ME_GAN):
 #             self.me_test_locations = tf.gather(metl, im_id)
 #         else:
         self.test_locations_ph = tf.placeholder(name='test_locations_ph', dtype=tf.float32,
-                                                shape=(self.config.test_locations, self.df_out_dim))
+                                                shape=(self.config.test_locations, self.dof_dim))
         self.test_locations = tf.concat([G2, images2], 0)
-        self.test_locations_v = np.zeros((self.config.test_locations, self.df_out_dim))
+        self.test_locations_v = np.zeros((self.config.test_locations, self.dof_dim))
 
 
         assert self.config.kernel in ['dot', 'mix_rq', 'mix_rbf', 'distance'], \
@@ -99,45 +99,80 @@ class MEbrb_GAN(ME_GAN):
         self.optim_name = self.config.kernel + ' kernel mean embedding brb loss'
         with tf.variable_scope('loss'):
             self.g_loss = tf.sqrt(_eps + tf.reduce_sum(tf.square(diff))) / self.config.test_locations
-            Z = diff * self.batch_size
+#            Z = diff * self.batch_size
             self.d_loss = -tf.sqrt(_eps + tf.reduce_sum(tf.square(self.mu_real - mu_fake))) / self.config.test_locations
 
         self.d_loss_value, self.g_loss_value = np.inf, np.inf
-    #     if 'full_gp' in self.config.suffix:
-    #         super(ME_GAN, self).add_gradient_penalty(kernel, G, images)
-    #     else:
-    #         self.add_gradient_penalty(k_test, G, images, Z)
-    #
-    # def add_gradient_penalty(self, k_test, fake_data, real_data, Z):
-    #     alpha = tf.random_uniform(shape=[self.batch_size, 1], minval=0., maxval=1.)
-    #     if 'mid' in self.config.suffix:
-    #         alpha = .4 + .2 * alpha
-    #     elif 'edges' in self.config.suffix:
-    #         qq = tf.cast(tf.reshape(tf.multinomial([[.5, .5]], self.batch_size),
-    #                                 [self.batch_size, 1]), tf.float32)
-    #         alpha = .1 * alpha * qq + (1. - .1 * alpha) * (1. - qq)
-    #     elif 'edge' in self.config.suffix:
-    #         alpha = .99 + .01 * alpha
-    #     x_hat = (1. - alpha) * real_data + alpha * fake_data
-    #     witness = tf.matmul(k_test(x_hat), Z)
-    #     gradients = tf.gradients(witness, [x_hat])[0]
-    #     penalty = tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0))
-    #
-    #     if self.config.gradient_penalty > 0:
-    #         self.gp = tf.get_variable('gradient_penalty', dtype=tf.float32,
-    #                                   initializer=self.config.gradient_penalty)
-    #         self.g_loss = self.mmd_loss
-    #         self.d_loss = -self.mmd_loss + penalty * self.gp
-    #         self.optim_name += ' gp %.1f' % self.config.gradient_penalty
-    #     else:
-    #         self.g_loss = self.mmd_loss
-    #         self.d_loss = -self.mmd_loss
-    #     # variable_summaries([(gradients, 'dx_gradients')])
-    #     tf.summary.scalar(self.optim_name + ' G', self.g_loss)
-    #     tf.summary.scalar(self.optim_name + ' D', self.d_loss)
-    #     tf.summary.scalar('dx_penalty', penalty)
 
+        self.add_gradient_penalty(kernel, G, images)
+        
 
+    def add_gradient_penalty(self, kernel, fake, real):
+        if self.config.gradient_penalty == 0:
+            return
+        bs = self.config.test_locations
+        real, fake = real[:bs], fake[:bs]
+        alpha = tf.random_uniform(shape=[bs])
+        if 'mid' in self.config.suffix:
+            alpha = .4 + .2 * alpha
+        elif 'edges' in self.config.suffix:
+            qq = tf.cast(tf.reshape(tf.multinomial([[.5, .5]], bs),
+                                    [bs]), tf.float32)
+            alpha = .1 * alpha * qq + (1. - .1 * alpha) * (1. - qq)
+        elif 'edge' in self.config.suffix:
+            alpha = .99 + .01 * alpha
+
+        if self.config.gp_type == 'feature_space':
+            alpha = tf.reshape(alpha, [bs, 1])
+            x_hat = (1. - alpha) * real + alpha * fake
+            Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
+            witness = Ekx(real) - Ekx(fake)
+            gradients = tf.gradients(witness, [x_hat])[0]
+        elif self.config.gp_type == 'data_space':
+            alpha = tf.reshape(alpha, [bs, 1, 1, 1])
+            real_data = self.images[:bs] #before discirminator
+            fake_data = self.G[:bs] #before discriminator
+            x_hat_data = (1. - alpha) * real_data + alpha * fake_data
+            if self.check_numerics:
+                x_hat_data = tf.check_numerics(x_hat_data, 'x_hat_data')
+            x_hat = self.discriminator(x_hat_data, reuse=True, batch_size=bs)
+            if self.check_numerics:
+                x_hat = tf.check_numerics(x_hat, 'x_hat')
+            Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
+            witness = Ekx(real) - Ekx(fake)
+            if self.check_numerics:
+                witness = tf.check_numerics(witness, 'witness')
+            gradients = tf.gradients(witness, [x_hat_data])[0]
+            if self.check_numerics:
+                gradients = tf.check_numerics(gradients, 'gradients 0')
+        elif self.config.gp_type == 'wgan':
+            alpha = tf.reshape(alpha, [bs, 1, 1, 1])
+            real_data = self.images #before discirminator
+            fake_data = self.G #before discriminator
+            x_hat_data = (1. - alpha) * real_data + alpha * fake_data
+            x_hat = self.discriminator(x_hat_data, reuse=True, batch_size=bs)
+            gradients = tf.gradients(x_hat, [x_hat_data])[0]
+        
+        if self.check_numerics:
+#            gradients = tf.check_numerics(tf.clip_by_norm(gradients, 100.), 'gradients F')    
+            penalty = tf.check_numerics(tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0)), 'penalty')
+        else:
+#            gradients = tf.clip_by_norm(gradients, 100.) 
+            penalty = tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0))#
+
+        
+        print('adding gradient penalty')
+        with tf.variable_scope('loss'):
+            self.gp = tf.get_variable('gradient_penalty', dtype=tf.float32,
+                                      initializer=self.config.gradient_penalty)
+            self.d_loss += penalty * self.gp
+            self.optim_name += ' gp %.1f' % self.config.gradient_penalty
+            # variable_summaries([(gradients, 'dx_gradients')])
+            tf.summary.scalar(self.optim_name + ' G', self.g_loss)
+            tf.summary.scalar(self.optim_name + ' D', self.d_loss)
+            tf.summary.scalar('dx_penalty', penalty)
+        
+            
     def train_step(self):
         step = self.sess.run(self.global_step)
         write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \

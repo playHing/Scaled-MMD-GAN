@@ -9,11 +9,7 @@ import os
 import time
 
 class ME_GAN(MMD_GAN):
-    def __init__(self, sess, config, is_crop=True,
-                 batch_size=64, output_size=64,
-                 z_dim=100, 
-                 gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
-                 checkpoint_dir=None, sample_dir=None, log_dir=None, data_dir=None):
+    def __init__(self, sess, config, **kwargs):
         """
         Args:
             sess: TensorFlow session
@@ -26,12 +22,9 @@ class ME_GAN(MMD_GAN):
             dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
-        self.asi = [np.zeros([batch_size, output_size, output_size, c_dim])]
-        super(ME_GAN, self).__init__(sess=sess, config=config, is_crop=is_crop,
-             batch_size=batch_size, output_size=output_size, z_dim=z_dim, 
-             gfc_dim=gfc_dim, dfc_dim=dfc_dim, 
-             c_dim=c_dim, dataset_name=dataset_name, checkpoint_dir=checkpoint_dir,
-             sample_dir=sample_dir, log_dir=log_dir, data_dir=data_dir)
+        self.asi = [np.zeros([kwargs['batch_size'], kwargs['output_size'], 
+                              kwargs['output_size'], kwargs['c_dim']])]
+        super(ME_GAN, self).__init__(sess, config, **kwargs)
         
 #    def test_location_initializer(self):
 #        if 'lsun' in self.config.dataset:

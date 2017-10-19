@@ -14,44 +14,65 @@ _check_numerics=False
 ################################################################################
 ### Quadratic-time MMD with Gaussian RBF kernel
 
-def _distance_kernel(X, Y, K_XY_only=False):
+def _distance_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
     XX = tf.matmul(X, X, transpose_b=True)
     XY = tf.matmul(X, Y, transpose_b=True)
     YY = tf.matmul(Y, Y, transpose_b=True)
-
+    if check_numerics:
+        XX = tf.check_numerics(XX, 'dist XX')
+        XY = tf.check_numerics(XY, 'dist XY')
+        YY = tf.check_numerics(YY, 'dist YY')
+        
     X_sqnorms = tf.diag_part(XX)
     Y_sqnorms = tf.diag_part(YY)
 
     r = lambda x: tf.expand_dims(x, 0)
     c = lambda x: tf.expand_dims(x, 1)
-    mysqrt = lambda x: tf.sqrt(x + _eps)
+    mysqrt = lambda x: tf.sqrt(tf.maximum(x + _eps, 0.))
 
     K_XY = c(mysqrt(X_sqnorms)) + r(mysqrt(Y_sqnorms)) + mysqrt(-2 * XY + c(X_sqnorms) + r(Y_sqnorms))
 
+    if check_numerics:
+        K_XY = tf.check_numerics(K_XY, 'dist K_XY')
     if K_XY_only:
         return K_XY
 
     K_XX = c(mysqrt(X_sqnorms)) + r(mysqrt(X_sqnorms)) + mysqrt(-2 * XX + c(X_sqnorms) + r(X_sqnorms))
     K_YY = c(mysqrt(Y_sqnorms)) + r(mysqrt(Y_sqnorms)) + mysqrt(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))
-
+    if check_numerics:
+        K_XX = tf.check_numerics(K_XX, 'dist K_XX')
+        K_YY = tf.check_numerics(K_YY, 'dist K_YY')  
+        
     return K_XX, K_XY, K_YY, False
 
-def _dot_kernel(X, Y, K_XY_only=False):
+def _dot_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
     K_XY = tf.matmul(X, Y, transpose_b=True)
+    if check_numerics:
+        K_XY = tf.check_numerics(K_XY, 'dot K_XY')
     if K_XY_only:
         return K_XY
+    
     K_XX = tf.matmul(X, X, transpose_b=True)
     K_YY = tf.matmul(Y, Y, transpose_b=True)
+    if check_numerics:
+        K_XX = tf.check_numerics(K_XX, 'dot K_XX')
+        K_YY = tf.check_numerics(K_YY, 'dot K_YY')    
+    
     return K_XX, K_XY, K_YY, False
 
-def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, K_XY_only=False):
+def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, 
+                    K_XY_only=False, check_numerics=_check_numerics):
     if wts is None:
         wts = [1] * len(sigmas)
 
     XX = tf.matmul(X, X, transpose_b=True)
     XY = tf.matmul(X, Y, transpose_b=True)
     YY = tf.matmul(Y, Y, transpose_b=True)
-
+    if check_numerics:
+        XX = tf.check_numerics(XX, 'rbf XX')
+        XY = tf.check_numerics(XY, 'rbf XY')
+        YY = tf.check_numerics(YY, 'rbf YY')
+        
     X_sqnorms = tf.diag_part(XX)
     Y_sqnorms = tf.diag_part(YY)
 
@@ -64,7 +85,10 @@ def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, K
     for sigma, wt in zip(sigmas, wts):
         gamma = 1 / (2 * sigma**2)
         K_XY += wt * tf.exp(-gamma * XYsqnorm)
-    
+
+    if check_numerics:
+        K_XY = tf.check_numerics(K_XY, 'rbf K_XY')
+        
     if K_XY_only:
         return K_XY
     
@@ -75,6 +99,10 @@ def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, K
         K_XX += wt * tf.exp(-gamma * XXsqnorm)
         K_YY += wt * tf.exp(-gamma * YYsqnorm)
 
+    if check_numerics:
+        K_XX = tf.check_numerics(K_XX, 'rbf K_XX')
+        K_YY = tf.check_numerics(K_YY, 'rbf K_YY')
+        
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
 
 
@@ -91,9 +119,9 @@ def _mix_rq_kernel(X, Y, alphas=[.001, .01, .1, 1.0, 10.0], wts=None,
     XY = tf.matmul(X, Y, transpose_b=True)
     YY = tf.matmul(Y, Y, transpose_b=True)
     if check_numerics:
-        XX = tf.check_numerics(XX, 'XX')
-        XY = tf.check_numerics(XY, 'XY')
-        YY = tf.check_numerics(YY, 'YY')
+        XX = tf.check_numerics(XX, 'rq XX')
+        XY = tf.check_numerics(XY, 'rq XY')
+        YY = tf.check_numerics(YY, 'rq YY')
 
     X_sqnorms = tf.diag_part(XX)
     Y_sqnorms = tf.diag_part(YY)
@@ -123,7 +151,7 @@ def _mix_rq_kernel(X, Y, alphas=[.001, .01, .1, 1.0, 10.0], wts=None,
     for alpha, wt in zip(alphas, wts):
         logXX = tf.log(1. + XXsqnorm/(2.*alpha))
         logYY = tf.log(1. + YYsqnorm/(2.*alpha))
-        if tf.check_numerics:
+        if check_numerics:
             logXX = tf.check_numerics(logXX, 'K_XX_log %f' % alpha)
             logYY = tf.check_numerics(logYY, 'K_YY_log %f' % alpha)
         K_XX += wt * tf.exp(-alpha * logXX)
