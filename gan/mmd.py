@@ -30,15 +30,15 @@ def _distance_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
     c = lambda x: tf.expand_dims(x, 1)
     mysqrt = lambda x: tf.sqrt(tf.maximum(x + _eps, 0.))
 
-    K_XY = c(mysqrt(X_sqnorms)) + r(mysqrt(Y_sqnorms)) + mysqrt(-2 * XY + c(X_sqnorms) + r(Y_sqnorms))
+    K_XY = c(mysqrt(X_sqnorms)) + r(mysqrt(Y_sqnorms)) - mysqrt(-2 * XY + c(X_sqnorms) + r(Y_sqnorms))
 
     if check_numerics:
         K_XY = tf.check_numerics(K_XY, 'dist K_XY')
     if K_XY_only:
         return K_XY
 
-    K_XX = c(mysqrt(X_sqnorms)) + r(mysqrt(X_sqnorms)) + mysqrt(-2 * XX + c(X_sqnorms) + r(X_sqnorms))
-    K_YY = c(mysqrt(Y_sqnorms)) + r(mysqrt(Y_sqnorms)) + mysqrt(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))
+    K_XX = c(mysqrt(X_sqnorms)) + r(mysqrt(X_sqnorms)) - mysqrt(-2 * XX + c(X_sqnorms) + r(X_sqnorms))
+    K_YY = c(mysqrt(Y_sqnorms)) + r(mysqrt(Y_sqnorms)) - mysqrt(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))
     if check_numerics:
         K_XX = tf.check_numerics(K_XX, 'dist K_XX')
         K_YY = tf.check_numerics(K_YY, 'dist K_YY')  

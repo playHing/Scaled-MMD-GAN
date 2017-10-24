@@ -16,11 +16,11 @@ class Cramer_GAN(MMD_GAN):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.lr = tf.get_variable('lr', dtype=tf.float32, initializer=self.config.learning_rate)
         if 'lsun' in self.config.dataset:
-            self.set_lmdb_pipeline(streams=[self.real_batch_size, self.real_batch_size])
+            self.set_lmdb_pipeline()
         elif 'celebA' in self.config.dataset:
-            self.set_folder_pipeline(streams=[self.real_batch_size, self.real_batch_size])
+            self.set_input3_pipeline()
         else:
-            self.set_input_pipeline(streams=[self.real_batch_size, self.real_batch_size])
+            self.set_input_pipeline()
 
 
         self.sample_z = tf.constant(np.random.uniform(-1, 1, size=(self.sample_size,
@@ -33,7 +33,11 @@ class Cramer_GAN(MMD_GAN):
                                                     maxval=1., dtype=tf.float32, name='z2'),
                                 reuse=True, batch_size=self.batch_size)
         self.sampler = self.generator(self.sample_z, is_train=False, reuse=True)
-
+        
+        if self.check_numerics:
+            self.G = tf.check_numerics(self.G, 'self.G')
+            self.G2 = tf.check_numerics(self.G2, 'self.G2')
+            
         if self.config.dc_discriminator:
             images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
 #            images2 = self.discriminator(self.images2, reuse=True, batch_size=self.real_batch_size)
@@ -62,6 +66,11 @@ class Cramer_GAN(MMD_GAN):
         
         
     def set_loss(self, G, G2, images):
+        if self.check_numerics:
+            G = tf.check_numerics(G, 'G')
+            G2 = tf.check_numerics(G2, 'G2')
+            images = tf.check_numerics(images, 'images')
+            
         bs = min([self.batch_size, self.real_batch_size])
         
         if self.config.single_batch_experiment:
@@ -80,27 +89,38 @@ class Cramer_GAN(MMD_GAN):
         with tf.variable_scope('loss'):
             if self.config.model == 'deepmind_cramer':
                 self.g_loss = tf.reduce_mean(
-                    - tf.norm(G - G2) + tf.norm(G - images) + tf.norm(G2 - images))
+                    - tf.norm(G - G2, axis=1) + tf.norm(G - images, axis=1) + tf.norm(G2 - images, axis=1))
                 self.d_loss = -tf.reduce_mean(critic(images, G) - critic(G2, G))
                 to_penalize = critic(x_hat, G)
                 
             elif self.config.model == 'reddit_cramer':
                 self.g_loss = tf.reduce_mean(critic(images, G) - critic(G, G2))
-                d_hat = critic(x_hat, self.x2_)
                 self.d_loss = -self.g_loss
                 to_penalize = critic(x_hat, G)
                 
-            elif self.config.model == 'better_cramer':
-                S_PQ = tf.reduce_mean(1/2 * tf.norm(G - G2) - tf.norm(G - images))
+            elif self.config.model == 'better_cramer':            
+                S_PQ = tf.reduce_mean(1/2 * tf.norm(G - G2, axis=1) - tf.norm(G - images, axis=1))
+                if self.check_numerics:
+                    S_PQ = tf.check_numerics(S_PQ, 'better_S_PQ')
                 self.g_loss = -S_PQ # miminize divergence ~ max expected score S_PQ ~ min -S_PQ
-                self.d_loss = S_PQ + tf.norm(images)
-                to_penalize = 1/2 * tf.norm(x_hat - G2) - tf.norm(x_hat - images)
+                self.d_loss = S_PQ + tf.reduce_mean(tf.norm(images, axis=1))
+                if self.check_numerics:
+                    self.d_loss= tf.check_numerics(self.d_loss, 'better_self.d_loss')
+                to_penalize = 1/2 * tf.norm(x_hat - G2, axis=1) - tf.norm(x_hat - images, axis=1)
+                if self.check_numerics:
+                    to_penalize = tf.check_numerics(to_penalize, 'better_to_penalize')
                 
-            elif self.config.model == 'crammer_no_hy':
-                S_PQ = tf.reduce_mean(1/2 * tf.norm(G - G2) - tf.norm(G - images))
+            elif self.config.model == 'cramer_no_hy':
+                S_PQ = tf.reduce_mean(1/2 * tf.norm(G - G2, axis=1) - tf.norm(G - images, axis=1))
+                if self.check_numerics:
+                    S_PQ = tf.check_numerics(S_PQ, 'no_hy_S_PQ')
                 self.g_loss = -S_PQ # miminize divergence ~ max expected score S_PQ ~ min -S_PQ
                 self.d_loss = S_PQ
-                to_penalize = 1/2 * tf.norm(x_hat - G2) - tf.norm(x_hat - images)
+                to_penalize = 1/2 * tf.norm(x_hat - G2, axis=1) - tf.norm(x_hat - images, axis=1)
+                if self.check_numerics:
+                    to_penalize = tf.check_numerics(to_penalize, 'no_hy_to_penalize')
+            else:
+                raise(AttributeError('wrong cramer model'))
                 
             gradients = tf.gradients(to_penalize, [x_hat_data])[0]
             if self.check_numerics:

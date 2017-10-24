@@ -147,6 +147,10 @@ class MMD_GAN(object):
         print('Execution start time: %s' % time.ctime())
         pprint.PrettyPrinter().pprint(self.config.__dict__['__flags'])
         self.build_model()
+        
+        if not config.is_train:
+            self.initialized_for_sampling = False
+            
 
     def build_model(self):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
@@ -154,7 +158,7 @@ class MMD_GAN(object):
         if 'lsun' in self.config.dataset:
             self.set_lmdb_pipeline()
         elif self.config.dataset == 'celebA':
-            self.set_folder_pipeline()
+            self.set_input3_pipeline()
         else:
             self.set_input_pipeline()
 
@@ -363,7 +367,30 @@ class MMD_GAN(object):
             if not os.path.exists(sample_dir):
                 os.makedirs(sample_dir)
             p = os.path.join(sample_dir, 'train_{:02d}.png'.format(step))
-            save_images(samples[:64, :, :, :], [8, 8], p)        
+            save_images(samples[:64, :, :, :], [8, 8], p)  
+            
+    def get_samples(self, n=None, save=True):
+        if not self.initialized_for_sampling:
+            print('[*] Loading from ' + self.checkpoint_dir + '...')
+            self.sess.run(tf.local_variables_initializer())
+            self.sess.run(tf.global_variables_initializer())
+            if self.load(self.checkpoint_dir):
+                print(" [*] Load SUCCESS, model trained up to epoch %d" % \
+                      self.sess.run(self.global_step))
+            else:
+                print(" [!] Load failed...")
+                return
+        if n is None:
+            n = self.sample_size
+        sampled = []
+        while len(sampled) * self.sample_size < n:
+            sampled.append(self.sess.run(self.sampler))
+        samples = np.concatenate(sampled, axis=0)[:n]
+        if not save:
+            return samples
+        file = os.path.join(self.sample_dir, self.description, 'samples.npy')
+        np.save(file, samples, allow_pickle=False)
+        print(" [*] %d samples saved in '%s'" % (n, file))
     
     
     def make_video(self, step, G_config, optim_loss, freq=10):
@@ -503,61 +530,176 @@ class MMD_GAN(object):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
         off = int(np.random.rand()*( data_X.shape[0] - self.batch_size*2))
         self.additional_sample_images = data_X[off: off + self.batch_size].astype(np.float32)
-
         # with tf.Session() as sess:
         #     print('images2.shape = ' + repr(sess.run(self.images2).shape))
             # print('images.shape = ' + repr(sess.run(self.images).shape))
-   
-    def set_folder_pipeline(self, streams=None):
+
+    def set_input2_pipeline(self, streams=None, split=2):
+        if self.config.dataset in ['mnist', 'cifar10']:
+            path = os.path.join(self.data_dir, self.dataset_name)
+            data_X, data_y = getattr(load, self.config.dataset)(path)
+        elif self.config.dataset in ['celebA']:
+            files = glob(os.path.join(self.data_dir, self.dataset_name, '*.jpg'))
+            preprocessed = []
+            for ii, ff in enumerate(files[:]):
+                preprocessed.append(get_image(ff, 144, 144, resize_height=self.output_size, 
+                                              resize_width=self.output_size))
+                if ii % 1000 == 0:
+                    print('Preprocessing images: %d/%d, time: %.2f' % \
+                          (ii + 1, len(files), time.time() - self.start_time))
+            data_X = np.array(preprocessed)
+        elif self.config.dataset == 'GaussianMix':
+            G_config = {'g_line': None}
+            path = os.path.join(self.sample_dir, self.description)
+            data_X, G_config['ax1'], G_config['writer'] = load.GaussianMix(path)
+            G_config['fig'] = G_config['ax1'].figure
+            self.G_config = G_config
+        else:
+            raise ValueError("not implemented dataset '%s'" % self.config.dataset)
         if streams is None:
             streams = [self.real_batch_size]
         streams = np.cumsum(streams)
         bs = streams[-1]
+
+        nn = data_X.shape[0]//split
+        queues = [tf.train.input_producer(
+            tf.constant(data_X[i*nn: (i+1) * nn].astype(np.float32)), shuffle=False) \
+            for i in range(split)
+        ]
         
-        read_batch = max(10000, bs * 20)
+        single_samples = [q.dequeue_many(bs * 4//split) for q in queues]
+        imQ = []
+        for ss in single_samples:
+            ss.set_shape([bs * 4//split, self.output_size, self.output_size, self.c_dim])
+            imQ.append(tf.train.shuffle_batch(
+                [ss], 
+                batch_size=bs//split,
+                capacity=max(bs * 8, self.batch_size * 32)//split,
+                min_after_dequeue=max(bs * 2, self.batch_size * 8)//split,
+                num_threads=4,
+                enqueue_many=True
+            ))
+        # self.images2 = ims[streams[0]: streams[0] + streams[1]]
+        ims = tf.concat(imQ, axis=0)
+        self.images = ims[:streams[0]]
+
+        for j in np.arange(1, len(streams)):
+            self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
+        off = int(np.random.rand()*( data_X.shape[0] - self.batch_size*2))
+        self.additional_sample_images = data_X[off: off + self.batch_size].astype(np.float32)
         
-        print(os.path.join(self.data_dir, self.dataset_name))
-        files = glob(os.path.join(self.data_dir, self.dataset_name, '*.jpg'))
-#        files = tf.train.match_filenames_once('./data/celebA/*.jpg')
-#        print('.' in files)
-        
-        file_queue = tf.train.string_input_producer(files,#tf.constant(files, tf.string), 
-                                                    shuffle=True, capacity=32)
-        reader = tf.WholeFileReader()
-        _, value = reader.read(file_queue)
-        image = tf.image.decode_jpeg(value, channels=3)
-        
-        cropped_image = tf.image.crop_to_bounding_box(image, 37, 17, 144, 144)
-        cropped_image = tf.expand_dims(cropped_image, 0)
-        reshaped_image = tf.image.resize_bilinear(cropped_image, [self.output_size, self.output_size])
-        tf.squeeze(reshaped_image)
-        single_sample = reshaped_image/127.5 - 1.
-#        single_file = file_queue.dequeue()
-#        
+    def set_input3_pipeline(self, streams=None):
+        if streams is None:
+            streams = [self.real_batch_size]
+        streams = np.cumsum(streams)
+        bs = streams[-1]
+        read_batch = max(20000, bs * 10)
+
+        self.files = glob(os.path.join(self.data_dir, self.dataset_name, '*.jpg'))
         self.read_count = 0
-        def get_sample_from_file(ff):
+        def get_read_batch(k, limit=read_batch):
             with tf.device('/cpu:0'):
                 rc = self.read_count
-                self.read_count += 1
+                self.read_count += read_batch
+                if rc//len(self.files) < self.read_count//len(self.files):
+                    self.files = list(np.random.permutation(self.files))
                 tt = time.time()
-                if rc % 1 == 0:
-                    print('[%d][%f] read start %s' % (rc, tt - self.start_time, ff))
-                im =  get_image(ff, 144, 144, resize_height=self.output_size, 
-                            resize_width=self.output_size)
-                if rc % 1 == 0:
-                    print('[%d][%f] read time = %f' % (rc, time.time() - self.start_time, time.time() - tt))
-                return im 
-#        
-#        single_sample = tf.py_func(get_sample_from_file, [single_file], tf.float32, stateful=False)
-#        single_sample.set_shape([self.output_size, self.output_size, self.c_dim])
+                print('[%d][%f] read start' % (rc, tt - self.start_time))
+                ims = []
+                files_k = self.files[k: k + read_batch] + self.files[: max(0, k + read_batch - len(self.files))]
+                for ii, ff in enumerate(files_k):
+                    ims.append(get_image(ff, 144, 144, resize_height=self.output_size, 
+                                                  resize_width=self.output_size))
+                print('[%d][%f] read time = %f' % (rc, time.time() - self.start_time, time.time() - tt))
+                return np.asarray(ims, dtype=np.float32)                
+                
+
+        choice = np.random.choice(len(self.files), 1)[0]
+        sampled = get_read_batch(choice, self.sample_size + self.batch_size)
+
+        self.additional_sample_images = sampled[self.sample_size: self.sample_size + self.batch_size]
+        print('self.additional_sample_images.shape: ' + repr(self.additional_sample_images.shape))
         # tf queue for getting keys
+#        key_producer = tf.train.string_input_producer(keys, shuffle=True)
+        key_producer = tf.train.range_input_producer(len(self.files), shuffle=True)
+        single_key = key_producer.dequeue()
         
-        ims = tf.train.batch([single_sample], bs,
-                                            capacity=max(bs * 8, read_batch * 4),
-                                            num_threads=16,
-                                            enqueue_many=False)
+        single_sample = tf.py_func(get_read_batch, [single_key], tf.float32)
+        single_sample.set_shape([read_batch, self.output_size, self.output_size, self.c_dim])
+
+#        self.images = tf.train.shuffle_batch([single_sample], self.batch_size, 
+#                                            capacity=read_batch * 4, 
+#                                            min_after_dequeue=read_batch//2,
+#                                            num_threads=2,
+#                                            enqueue_many=True)
+        ims = tf.train.shuffle_batch([single_sample], bs,
+                                            capacity=read_batch * 16,
+                                            min_after_dequeue=read_batch * 2,
+                                            num_threads=8,
+                                            enqueue_many=True)
         
-        ims = tf.squeeze(ims)
+        self.images = ims[:streams[0]]
+        for j in np.arange(1, len(streams)):
+            self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
+        
+        
+    def set_folder_pipeline(self, streams=None):
+        with tf.device('/cpu:0'):
+            if streams is None:
+                streams = [self.real_batch_size]
+            streams = np.cumsum(streams)
+            bs = streams[-1]
+            
+            read_batch = max(10000, bs * 20)
+            
+            print(os.path.join(self.data_dir, self.dataset_name))
+            files = glob(os.path.join(self.data_dir, self.dataset_name, '*.jpg'))
+    #        files = tf.train.match_filenames_once('./data/celebA/*.jpg')
+    #        print('.' in files)
+            
+            file_queue = tf.train.string_input_producer(files,#tf.constant(files, tf.string), 
+                                                        shuffle=True, capacity=2048)
+            reader = tf.WholeFileReader()
+            _, value = reader.read(file_queue)
+            single_sample = tf.image.decode_jpeg(value, channels=3)
+            single_sample.set_shape([218, 178, 3])
+#            image = tf.image.decode_jpeg(value, channels=3)
+#            cropped_image = tf.image.crop_to_bounding_box(image, 37, 17, 144, 144)
+#            cropped_image = tf.expand_dims(cropped_image, 0)
+#            reshaped_image = tf.image.resize_bilinear(cropped_image, [self.output_size, self.output_size])
+#            tf.squeeze(reshaped_image)
+#            single_sample = reshaped_image/127.5 - 1.            
+#        single_file = file_queue.dequeue()
+#        
+            self.read_count = 0
+            def get_sample_from_file(ff):
+                with tf.device('/cpu:0'):
+                    rc = self.read_count
+                    self.read_count += 1
+                    tt = time.time()
+                    if rc % 1 == 0:
+                        print('[%d][%f] read start %s' % (rc, tt - self.start_time, ff))
+                    im =  get_image(ff, 144, 144, resize_height=self.output_size, 
+                                resize_width=self.output_size)
+                    if rc % 1 == 0:
+                        print('[%d][%f] read time = %f' % (rc, time.time() - self.start_time, time.time() - tt))
+                    return im  
+    #        
+    #        single_sample = tf.py_func(get_sample_from_file, [single_file], tf.float32, stateful=False)
+    #        single_sample.set_shape([self.output_size, self.output_size, self.c_dim])
+            # tf queue for getting keys
+            
+            ims = tf.train.shuffle_batch([single_sample], bs,
+                                                capacity=max(bs * 8, read_batch * 4),
+                                                num_threads=16,
+                                                min_after_dequeue=bs*4,
+                                                enqueue_many=False)
+            
+        cropped_ims = tf.image.crop_to_bounding_box(ims, 37, 17, 144, 144)
+        reshaped_ims = tf.image.resize_bilinear(cropped_ims, [self.output_size, self.output_size])
+        ims = reshaped_ims/127.5 - 1.
+        
+#            ims = tf.squeeze(ims)
         self.images = ims[:streams[0]]
         for j in np.arange(1, len(streams)):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
@@ -569,6 +711,49 @@ class MMD_GAN(object):
         self.additional_sample_images = sampled[self.sample_size: self.sample_size + self.batch_size]
         print('self.additional_sample_images.shape: ' + repr(self.additional_sample_images.shape))           
                      
+    def set_folder2_pipeline(self, streams=None):
+        with tf.device('/cpu:0'):
+            if streams is None:
+                streams = [self.real_batch_size]
+            streams = np.cumsum(streams)
+            bs = streams[-1]
+            
+            read_batch = max(10000, bs * 20)
+            
+            files = glob(os.path.join(self.data_dir, self.dataset_name, '*.jpg'))
+            preprocessed = []
+            for ii, ff in enumerate(files[:]):
+                preprocessed.append(get_image(ff, 144, 144, resize_height=self.output_size, 
+                                              resize_width=self.output_size))
+                if ii % 1000 == 0:
+                    print('Preprocessing images: %d/%d, time: %.2f' % \
+                          (ii + 1, len(files), time.time() - self.start_time))
+            data_X = np.array(preprocessed).astype(np.float32)
+            
+            sliceQ = tf.train.slice_input_producer([data_X], capacity=4096, 
+                                                   name='slice_input')
+            single_sample = sliceQ[0]
+            
+#            single_sample = tf.py_func(get_single, [single_im], tf.float32)
+#            single_sample.set_shape([self.output_size, self.output_size, self.c_dim])
+            
+            ims = tf.train.batch([single_sample], bs,
+                                 capacity=max(bs * 8, read_batch * 4),
+#                                 min_after_dequeue=max(bs * 2, read_batch//2),
+                                 num_threads=16,
+                                 enqueue_many=False)
+            
+            self.images = ims[:streams[0]]
+            for j in np.arange(1, len(streams)):
+                self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})  
+                
+            choice = np.random.choice(data_X.shape[0], self.sample_size + self.batch_size)
+            sampled = data_X[choice, :, :, :]
+    
+            self.additional_sample_images = sampled[self.sample_size: self.sample_size + self.batch_size]
+            print('self.additional_sample_images.shape: ' + repr(self.additional_sample_images.shape))
+            
+            
     def set_lmdb_pipeline(self, streams=None):
         if streams is None:
             streams = [self.real_batch_size]
@@ -657,6 +842,7 @@ class MMD_GAN(object):
         
                 
     def sampling(self, config):
+        self.sess.run(tf.local_variables_initializer())
         self.sess.run(tf.global_variables_initializer())
         print(self.checkpoint_dir)
         if self.load(self.checkpoint_dir):

@@ -50,7 +50,7 @@ class GAN(MMD_GAN):
 
         self.d_loss = tf.reduce_mean(G) - tf.reduce_mean(images) + self.gp * gradient_penalty
         self.g_loss = -tf.reduce_mean(G)
-        self.optim_name = 'wgan_gp_loss'
+        self.optim_name = 'wgan_gp%d_loss' % int(self.config.gradient_penalty)
 
         tf.summary.scalar(self.optim_name + ' G', self.g_loss)
         tf.summary.scalar(self.optim_name + ' D', self.d_loss)

@@ -119,12 +119,8 @@ def main(_):
                           data_dir=FLAGS.data_dir)
             
         if FLAGS.is_train:
-            if 'lsun' in FLAGS.dataset:
-                dcgan.train()
-            else:
-                dcgan.train()
-        else:
-            dcgan.sampling(FLAGS)
+            dcgan.train()
+        dcgan.get_samples(10000)
 
         if FLAGS.visualize:
             to_json("./web/js/layers.js", [dcgan.h0_w, dcgan.h0_b, dcgan.g_bn0],

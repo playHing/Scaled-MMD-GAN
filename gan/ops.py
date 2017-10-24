@@ -3,6 +3,7 @@ import tensorflow as tf
 from tensorflow.python.framework import ops
 
 from utils import variable_summaries
+from mmd import _check_numerics
 
 
 #class batch_norm(object):
@@ -109,7 +110,7 @@ def conv2d(input_, output_dim,
 
 def deconv2d(input_, output_shape,
              k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.02,
-             name="deconv2d", with_w=False):
+             name="deconv2d", with_w=False, check_numerics=_check_numerics):
     with tf.variable_scope(name):
         scope_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 
                                        tf.get_variable_scope().name)
@@ -117,6 +118,8 @@ def deconv2d(input_, output_shape,
         # filter : [height, width, output_channels, in_channels]
         w = tf.get_variable('w', [k_h, k_w, output_shape[-1], input_.get_shape()[-1]],
                             initializer=tf.random_normal_initializer(stddev=stddev))
+        if check_numerics:
+            w = tf.check_numerics(w, 'deconv_%s_w' % name)
 
         try:
             deconv = tf.nn.conv2d_transpose(input_, w, output_shape=output_shape,
@@ -129,6 +132,10 @@ def deconv2d(input_, output_shape,
 
         biases = tf.get_variable('biases', [output_shape[-1]], initializer=tf.constant_initializer(0.0))
         deconv = tf.reshape(tf.nn.bias_add(deconv, biases), deconv.get_shape())
+        
+        if _check_numerics:
+            biases = tf.check_numerics(biases, 'deconv_%s_biases' % name)
+            deconv = tf.check_numerics(deconv, 'deconv_%s_output' % name)
         
         if not has_summary:
             variable_summaries([(w, 'W'), (biases, 'b')])
