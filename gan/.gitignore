@@ -2,3 +2,12 @@
 /logs_*
 /samples_*
 /official_samples
+/model_mmd.py
+/*.pyc
+/run*.sh
+/temp*
+/tf_*
+/*cluster*
+/data
+/__pycache__
+/load.py
