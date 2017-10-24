@@ -1,0 +1,17 @@
+python /nfs/nhome/live/mikolajb/gan/main_mmd.py \
+    --checkpoint_dir=/checkpoint \
+    --sample_dir=samples \
+    --log_dir=/logs \
+    --data_dir=/data \
+    --model=deepmind_cramer \
+    --is_train=True \
+    --name=deepmind_cramer \
+    --max_iteration=100000 --init=0.1 \
+    --learning_rate=.000051 --batch_size=64 \
+    --architecture=dcgan --dc_discriminator --output_size=64 \
+    --dsteps=5 --gsteps=1 \
+    --batch_normi=False \
+    --dataset=celebA \
+    --gradient_penalty=10.0 \
+    --gf_dim=64 --df_dim=64 --dof_dim=256 \
+    --log=True
