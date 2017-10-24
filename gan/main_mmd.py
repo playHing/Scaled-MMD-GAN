@@ -120,7 +120,7 @@ def main(_):
             
         if FLAGS.is_train:
             dcgan.train()
-        dcgan.get_samples(10000)
+        dcgan.get_samples(100000)
 
         if FLAGS.visualize:
             to_json("./web/js/layers.js", [dcgan.h0_w, dcgan.h0_b, dcgan.g_bn0],
