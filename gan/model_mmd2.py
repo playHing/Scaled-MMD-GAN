@@ -586,7 +586,18 @@ class MMD_GAN(object):
         with tf.variable_scope("discriminator") as scope:
             if reuse:
                 scope.reuse_variables()
-            if 'dfc' in self.config.architecture:
+            if 'dcgan' in self.config.architecture: # default architecture
+                if self.dof_dim <= 0:
+                    self.dof_dim = self.df_dim * 8
+                # For Cramer:
+                # self.dof_dim = 256
+                # self.df_dim = 64
+                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv')) 
+                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
+                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
+                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
+                hF = linear(tf.reshape(h3, [batch_size, -1]), self.dof_dim, 'd_h4_lin')
+            elif 'dfc' in self.config.architecture:
                 h0 = lrelu(conv2d(image, self.df_dim, k_h=4, k_w=4, name='d_h0_conv'))
                 h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, k_h=4, k_w=4, name='d_h1_conv')))
                 h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, k_h=4, k_w=4, name='d_h2_conv')))
@@ -619,14 +630,6 @@ class MMD_GAN(object):
                 h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
                 h5 = lrelu(self.d_bn5(conv2d(h4, self.df_dim * 32, name='d_h5_conv')))
                 hF = linear(tf.reshape(h5, [batch_size, -1]), self.dof_dim , 'd_h6_lin')
-            elif 'dcgan' in self.config.architecture:
-                if self.dof_dim <= 0:
-                    self.dof_dim = self.df_dim * 8
-                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
-                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
-                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
-                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
-                hF = linear(tf.reshape(h3, [batch_size, -1]), self.dof_dim, 'd_h4_lin')
             else:
                 raise ValueError("Choose architecture from  [dfc, dcold, dcgan, dc64, dc128]")
             print(repr(image.get_shape()).replace('Dimension', '') + ' --> Discriminator --> ' + \
@@ -646,7 +649,28 @@ class MMD_GAN(object):
             if reuse:
                 scope.reuse_variables()
             s1, s2, s4, s8, s16 = conv_sizes(self.output_size, layers=4, stride=2)
-            if 'dfc' in self.config.architecture:
+            # 64, 32, 16, 8, 4 - for self.output_size = 64
+            if 'dcgan' in self.config.architecture:
+                # default architecture
+                # For Cramer: self.gf_dim = 64
+                z_ = linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin') # project random noise seed and reshape
+                
+                h0 = tf.reshape(z_, [batch_size, s16, s16, self.gf_dim * 8])
+                h0 = tf.nn.relu(self.g_bn0(h0))
+                
+                h1 = deconv2d(h0, [batch_size, s8, s8, self.gf_dim*4], name='g_h1')
+                h1 = tf.nn.relu(self.g_bn1(h1))
+                                
+                h2 = deconv2d(h1, [batch_size, s4, s4, self.gf_dim*2], name='g_h2')
+                h2 = tf.nn.relu(self.g_bn2(h2))
+                
+                h3 = deconv2d(h2, [batch_size, s2, s2, self.gf_dim*1], name='g_h3')
+                h3 = tf.nn.relu(self.g_bn3(h3))
+                
+                h4 = deconv2d(h3, [batch_size, s1, s1, self.c_dim], name='g_h4')
+                return tf.nn.sigmoid(h4)
+            
+            elif 'dfc' in self.config.architecture:
                 z_ = tf.reshape(z, [batch_size, 1, 1, -1])
                 h0 = tf.nn.relu(self.g_bn0(deconv2d(z_, 
                     [batch_size, s8, s8, self.gf_dim * 4], name='g_h0_conv',
@@ -657,6 +681,7 @@ class MMD_GAN(object):
                     [batch_size, s2, s2, self.gf_dim], name='g_h2_conv', k_h=4, k_w=4)))
                 h3 = deconv2d(h2, [batch_size, s1, s1, self.c_dim], name='g_h3_conv', k_h=4, k_w=4)
                 return tf.nn.sigmoid(h3)
+            
             elif 'dcold' in self.config.architecture:
                 # project `z` and reshape
                 self.z_, self.h0_w, self.h0_b = linear(
@@ -679,6 +704,7 @@ class MMD_GAN(object):
                 h4, self.h4_w, self.h4_b = deconv2d(
                     h3, [batch_size, s1, s1, self.c_dim], name='g_h4', with_w=True)
                 return tf.nn.sigmoid(h4)
+            
             elif 'dc64' in self.config.architecture:
                 s1, s2, s4, s8, s16, s32 = conv_sizes(self.output_size, layers=5, stride=2)
                 # project `z` and reshape
@@ -701,6 +727,7 @@ class MMD_GAN(object):
                 
                 h5 = deconv2d(h4, [batch_size, s1, s1, self.c_dim], name='g_h5')
                 return tf.nn.sigmoid(h5)
+            
             elif 'dc128' in self.config.architecture:
                 s1, s2, s4, s8, s16, s32, s64 = conv_sizes(self.output_size, layers=6, stride=2)
                 # project `z` and reshape
@@ -725,33 +752,8 @@ class MMD_GAN(object):
                 h5 = tf.nn.relu(self.g_bn5(h5))
 
                 h6 = deconv2d(h5, [batch_size, s1, s1, self.c_dim], name='g_h6')
-                # with tf.name_scope('G_outputs'):
-                    # variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'),
-                    #                     (h3, 'h3'), (h4, 'h4'), (h5, 'h5'),
-                    #                     (h6, 'h6')])
                 return tf.nn.sigmoid(h6)
-            elif 'dcgan' in self.config.architecture:
-                # project `z` and reshape
-                z_ = linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin')
-                
-                h0 = tf.reshape(z_, [batch_size, s16, s16, self.gf_dim * 8])
-                h0 = tf.nn.relu(self.g_bn0(h0))
-                
-                h1 = deconv2d(h0, [batch_size, s8, s8, self.gf_dim*4], name='g_h1')
-                h1 = tf.nn.relu(self.g_bn1(h1))
-                                
-                h2 = deconv2d(h1, [batch_size, s4, s4, self.gf_dim*2], name='g_h2')
-                h2 = tf.nn.relu(self.g_bn2(h2))
-                
-                h3 = deconv2d(h2, [batch_size, s2, s2, self.gf_dim*1], name='g_h3')
-                h3 = tf.nn.relu(self.g_bn3(h3))
-                
-                h4 = deconv2d(h3, [batch_size, s1, s1, self.c_dim], name='g_h4')
-                # with tf.name_scope('G_outputs'):
-                    # variable_summaries([(h0, 'h0'), (h1, 'h1'), (h2, 'h2'),
-                    #                     (h3, 'h3'),
-                    #                     (h4, 'h4')])
-                return tf.nn.sigmoid(h4)
+
             
     def train(self):    
         self.train_init()

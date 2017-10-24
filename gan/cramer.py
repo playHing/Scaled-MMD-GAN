@@ -40,12 +40,10 @@ class Cramer_GAN(MMD_GAN):
             
         if self.config.dc_discriminator:
             images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
-#            images2 = self.discriminator(self.images2, reuse=True, batch_size=self.real_batch_size)
             G2 = self.discriminator(self.G2, reuse=True)
             G = self.discriminator(self.G, reuse=True)
         else:
             images = tf.reshape(self.images, [self.real_batch_size, -1])
-#            images2 = tf.reshape(self.images2, [self.config.test_locations // 2, -1])
             G = tf.reshape(self.G, [self.batch_size, -1])
             G2 = tf.reshape(self.G2, [self.batch_size, -1])
 
@@ -86,8 +84,9 @@ class Cramer_GAN(MMD_GAN):
         x_hat = self.discriminator(x_hat_data, reuse=True, batch_size=bs)
         
         critic = lambda x, x_ : tf.norm(x - x_, axis=1) - tf.norm(x, axis=1) 
+        
         with tf.variable_scope('loss'):
-            if self.config.model == 'deepmind_cramer':
+            if self.config.model == 'deepmind_cramer': # Cramer GAN paper
                 self.g_loss = tf.reduce_mean(
                     - tf.norm(G - G2, axis=1) + tf.norm(G - images, axis=1) + tf.norm(G2 - images, axis=1))
                 self.d_loss = -tf.reduce_mean(critic(images, G) - critic(G2, G))
@@ -98,7 +97,7 @@ class Cramer_GAN(MMD_GAN):
                 self.d_loss = -self.g_loss
                 to_penalize = critic(x_hat, G)
                 
-            elif self.config.model == 'better_cramer':            
+            elif self.config.model == 'better_cramer':  # as proposed by Arthur          
                 S_PQ = tf.reduce_mean(1/2 * tf.norm(G - G2, axis=1) - tf.norm(G - images, axis=1))
                 if self.check_numerics:
                     S_PQ = tf.check_numerics(S_PQ, 'better_S_PQ')
@@ -126,19 +125,17 @@ class Cramer_GAN(MMD_GAN):
             if self.check_numerics:
                 gradients = tf.check_numerics(gradients, 'gradients 0')
             
-            if self.check_numerics:
-    #            gradients = tf.check_numerics(tf.clip_by_norm(gradients, 100.), 'gradients F')    
+            if self.check_numerics:  
                 penalty = tf.check_numerics(tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0)), 'penalty')
             else:
-    #            gradients = tf.clip_by_norm(gradients, 100.) 
                 penalty = tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0))#
 
         
             self.gp = tf.get_variable('gradient_penalty', dtype=tf.float32,
                                       initializer=self.config.gradient_penalty)
             self.d_loss += penalty * self.gp
+            
             self.optim_name = '%s gp %.1f' % (self.config.model, self.config.gradient_penalty)
-            # variable_summaries([(gradients, 'dx_gradients')])
             tf.summary.scalar(self.optim_name + ' G', self.g_loss)
             tf.summary.scalar(self.optim_name + ' D', self.d_loss)
             tf.summary.scalar('dx_penalty', penalty)
