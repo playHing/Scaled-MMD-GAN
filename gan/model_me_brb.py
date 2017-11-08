@@ -222,6 +222,9 @@ class MEbrb_GAN(ME_GAN):
                 if ('decay_gp' in self.config.suffix) and (self.config.gradient_penalty > 0):
                     self.gp *= self.config.decay_rate
                     print('current gradient penalty: %f' % self.sess.run(self.gp))
+        
+            if (step % 500 == 0) & self.config.compute_scores:
+                self.compute_scores(step)
                     
         if (step == 1) and (self.d_counter == 0):
             print('current learning rate: %f' % self.sess.run(self.lr))

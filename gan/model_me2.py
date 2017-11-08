@@ -134,25 +134,25 @@ class ME_GAN(MMD_GAN):
                     or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
         # write_summary = True
         # print('d, g = %d, %d' % (self.d_counter, self.g_counter))
-        if self.config.use_kernel:
-            eval_ops = [self.g_loss, self.d_loss]
-            if self.config.is_demo:
-                summary_str, step, g_loss, d_loss = self.sess.run(
-                    [self.TrainSummary] + eval_ops
-                )
-            else:
-                if self.d_counter == 0:
-                    if write_summary:
-                        _, summary_str, g_loss, d_loss = self.sess.run(
-                            [self.g_grads, self.TrainSummary] + eval_ops
-                        )
-                    else:
-                        _, g_loss, d_loss = self.sess.run([self.g_grads] + eval_ops)
+        eval_ops = [self.g_loss, self.d_loss]
+        if self.config.is_demo:
+            summary_str, step, g_loss, d_loss = self.sess.run(
+                [self.TrainSummary] + eval_ops
+            )
+        else:
+            if self.d_counter == 0:
+                if write_summary:
+                    _, summary_str, g_loss, d_loss = self.sess.run(
+                        [self.g_grads, self.TrainSummary] + eval_ops
+                    )
                 else:
-                    _, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
-            et = "[%2d] time: %4.4f" % (step, time.time() - self.start_time)
-            assert ~np.isnan(g_loss), "NaN g_loss, epoch: " + et
-            assert ~np.isnan(d_loss), "NaN d_loss, epoch: " + et              
+                    _, g_loss, d_loss = self.sess.run([self.g_grads] + eval_ops)
+            else:
+                _, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
+        et = "[%2d] time: %4.4f" % (step, time.time() - self.start_time)
+        assert ~np.isnan(g_loss), "NaN g_loss, epoch: " + et
+        assert ~np.isnan(d_loss), "NaN d_loss, epoch: " + et  
+            
         if self.d_counter == 0:
             if write_summary:
                 try:
@@ -171,7 +171,10 @@ class ME_GAN(MMD_GAN):
                 if ('decay_gp' in self.config.suffix) and (self.config.gradient_penalty > 0):
                     self.gp *= self.config.decay_rate
                     print('current gradient penalty: %f' % self.sess.run(self.gp))
-                    
+        
+            if (step % 500 == 0) & self.config.compute_scores:
+                self.compute_scores(step)
+                
         if (step == 1) and (self.d_counter == 0):
             print('current learning rate: %f' % self.sess.run(self.lr))
         if (self.g_counter == 0) and (self.d_grads is not None):

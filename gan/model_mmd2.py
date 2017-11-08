@@ -21,13 +21,12 @@ from utils import *
 import pprint
 from mmd import _eps, _check_numerics
 
+from compute_scores import *
+
 class MMD_GAN(object):
-    def __init__(self, sess, config, is_crop=True,
+    def __init__(self, sess, config, 
                  batch_size=64, output_size=64,
-                 z_dim=100,
-                 gfc_dim=1024, dfc_dim=1024, c_dim=3, dataset_name='default',
-                 checkpoint_dir=None, sample_dir=None, log_dir=None, 
-                 data_dir=None, gradient_clip=1.0):
+                 z_dim=100, c_dim=3, data_dir='./data'):
         if config.learning_rate_D < 0:
             config.learning_rate_D = config.learning_rate
         """
@@ -44,7 +43,21 @@ class MMD_GAN(object):
         """
         self.start_time = time.time()
         self.check_numerics = _check_numerics
+        self.dataset = config.dataset
+        
+        if config.compute_scores:
+            if self.dataset == 'mnist':
+                mod = LeNet()
+                s, f = 100000, 500
+            else:
+                mod = Inception()
+                s, f = 25000, 1000
+            arr = np.load(os.path.join(data_dir, self.dataset + '-codes.npy'))
+            self.scoring = {'model': mod, 'train_codes': arr[:s], 'output': [], 
+                            'frequency': f, 'size': s}
+            
         self.sess = sess
+
         if config.architecture == 'dc128':
             output_size = 128
         elif config.output_size == 128:
@@ -56,28 +69,19 @@ class MMD_GAN(object):
         if config.real_batch_size == -1:
             config.real_batch_size = config.batch_size
         self.config = config
-        self.is_crop = is_crop
         self.is_grayscale = (c_dim == 1)
         self.batch_size = batch_size
         self.real_batch_size = config.real_batch_size
         self.sample_size = batch_size
-#        if self.config.dataset == 'GaussianMix':
+#        if self.dataset == 'GaussianMix':
 #            self.sample_size = min(16 * batch_size, 512)
-        if self.config.gradient_penalty > 0:
-            config.suffix = '_' + config.gp_type + config.suffix
         self.output_size = output_size
-        self.sample_dir = sample_dir + config.suffix
-        self.log_dir=log_dir + config.suffix
-        self.checkpoint_dir = checkpoint_dir + config.suffix
         self.data_dir = data_dir
         self.z_dim = z_dim
 
         self.gf_dim = config.gf_dim
         self.df_dim = config.df_dim
         self.dof_dim = self.config.dof_dim
-
-        self.gfc_dim = gfc_dim
-        self.dfc_dim = dfc_dim
 
         self.c_dim = c_dim
 
@@ -112,7 +116,6 @@ class MMD_GAN(object):
             self.d_bn4 = lambda x: x
             self.d_bn5 = lambda x: x
             
-        self.dataset_name = dataset_name
         
         discriminator_desc = '_dc' if self.config.dc_discriminator else ''
         d_clip = self.config.discriminator_weight_clip
@@ -124,21 +127,21 @@ class MMD_GAN(object):
         arch = '%dx%d' % (self.config.gf_dim, self.config.df_dim)
 
         self.description = ("%s%s_%s%s_%s%sd%d-%d-%d_%s_%s_%s" % (
-                    self.dataset_name, arch,
+                    self.dataset, arch,
                     self.config.architecture, discriminator_desc,
                     self.config.kernel, dwc, self.config.dsteps,
                     self.config.start_dsteps, self.config.gsteps, self.batch_size,
                     self.output_size, lr))
+        
         if self.config.batch_norm:
             self.description += '_bn'
-            
+        
+        self._ensure_dirs()
+        
         if self.config.log:
-            sample_dir = os.path.join(self.sample_dir, self.description)
-            if not os.path.exists(sample_dir):
-                os.makedirs(sample_dir)
             self.old_stdout = sys.stdout
             self.old_stderr = sys.stderr
-            self.log_file = open(os.path.join(sample_dir, 'log.txt'), 'w', buffering=1)
+            self.log_file = open(os.path.join(self.sample_dir, 'log.txt'), 'w', buffering=1)
             print('Execution start time: %s' % time.ctime())
             print('Log file: %s' % self.log_file)
             sys.stdout = self.log_file
@@ -147,16 +150,31 @@ class MMD_GAN(object):
         pprint.PrettyPrinter().pprint(self.config.__dict__['__flags'])
         self.build_model()
         
-        if not config.is_train:
-            self.initialized_for_sampling = False
+        self.initialized_for_sampling = config.is_train
+
+    def _ensure_dirs(self, folders=['sample', 'log', 'checkpoint']):
+        if type(folders) == str:
+            folders = [folders]
+        if self.config.gradient_penalty > 0:
+            if not self.config.gp_type in self.config.suffix:
+                self.config.suffix = '_' + self.config.gp_type + self.config.suffix
+        for folder in folders:
+            ff = folder + '_dir'
+            if not os.path.exists(ff):
+                os.makedirs(ff)
+            self.__dict__[ff] = os.path.join(self.config.__getattr__(ff),
+                                             self.config.name + self.config.suffix,
+                                             self.description)
+            if not os.path.exists(self.__dict__[ff]):
+                os.makedirs(self.__dict__[ff])
             
 
     def build_model(self):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.lr = tf.get_variable('lr', dtype=tf.float32, initializer=self.config.learning_rate)
-        if 'lsun' in self.config.dataset:
+        if 'lsun' in self.dataset:
             self.set_lmdb_pipeline()
-        elif self.config.dataset == 'celebA':
+        elif self.dataset == 'celebA':
             self.set_input3_pipeline()
         else:
             self.set_input_pipeline()
@@ -286,9 +304,9 @@ class MMD_GAN(object):
             gradients = tf.gradients(x_hat, [x_hat_data])[0]
         
         if self.check_numerics:  
-            penalty = tf.check_numerics(tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0)), 'penalty')
+            penalty = tf.check_numerics(tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0)), 'penalty')
         else:
-            penalty = tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0))#
+            penalty = tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0))#
 
         
         print('adding gradient penalty')
@@ -344,26 +362,26 @@ class MMD_GAN(object):
         write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
                 or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
         # write_summary=True
-        if self.config.use_kernel:
-            eval_ops = [self.g_gvs, self.d_gvs, self.g_loss, self.d_loss]
-            if self.config.is_demo:
-                summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
-                    [self.TrainSummary] + eval_ops
-                )
-            else:
-                if self.d_counter == 0:
-                    if write_summary:
-                        _, summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
-                            [self.g_grads, self.TrainSummary] + eval_ops
-                        )
-                    else:
-                        _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.g_grads] + eval_ops)
+        eval_ops = [self.g_gvs, self.d_gvs, self.g_loss, self.d_loss]
+        if self.config.is_demo:
+            summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
+                [self.TrainSummary] + eval_ops
+            )
+        else:
+            if self.d_counter == 0:
+                if write_summary:
+                    _, summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
+                        [self.g_grads, self.TrainSummary] + eval_ops
+                    )
                 else:
-                    _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
-                et = "g step" if (self.d_counter == 0) else "d step"
-                et += ", epoch: [%2d] time: %4.4f" % (step, time.time() - self.start_time)
-
-        # G STEP
+                    _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.g_grads] + eval_ops)
+            else:
+                _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
+            et = "g step" if (self.d_counter == 0) else "d step"
+            et += ", epoch: [%2d] time: %4.4f" % (step, time.time() - self.start_time)
+        assert ~np.isnan(g_loss), "NaN g_loss, epoch: " + et
+        assert ~np.isnan(d_loss), "NaN d_loss, epoch: " + et  
+        # if G STEP
         if self.d_counter == 0:
             if step % 10000 == 0:
                 try:
@@ -380,14 +398,15 @@ class MMD_GAN(object):
                 self.lr *= self.config.decay_rate
                 print('current learning rate: %f' % self.sess.run(self.lr))
                 if ('decay_gp' in self.config.suffix) and (self.config.gradient_penalty > 0):
-                    self.gp *= self.config.decay_rate
+                    self.gp *= self.config.gp_decay_rate
                     print('current gradient penalty: %f' % self.sess.run(self.gp))
-            
-        if (step == 1) & (self.d_counter == 0):
-            print('current learning rate: %f' % self.sess.run(self.lr))
+        
+            if self.config.compute_scores:
+                self.compute_scores(step)
+        
         if (self.g_counter == 0) and (self.d_grads is not None):
             d_steps = self.config.dsteps
-            if ((step % 100 == 0) or (step < 20)):
+            if ((step % 500 == 0) or (step < 20)):
                 d_steps = self.config.start_dsteps
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         if self.d_counter == 0:
@@ -396,17 +415,13 @@ class MMD_GAN(object):
       
 
     def train_init(self):
-        if self.config.use_kernel:
-            self.set_grads()
+        self.set_grads()
 
         self.sess.run(tf.global_variables_initializer())
         self.TrainSummary = tf.summary.merge_all()
         
-        log_dir = os.path.join(self.log_dir, self.description)
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-            
-        self.writer = tf.summary.FileWriter(log_dir, self.sess.graph)
+        self._ensure_dirs('log')
+        self.writer = tf.summary.FileWriter(self.log_dir, self.sess.graph)
 
         self.d_counter, self.g_counter, self.err_counter = 0, 0, 0
         
@@ -414,23 +429,28 @@ class MMD_GAN(object):
             print(" [*] Load SUCCESS, re-starting at epoch %d" % self.sess.run(self.global_step))
         else:
             print(" [!] Load failed...")
+        
+        step = self.sess.run(self.global_step)
+        lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
+        self.lr *= self.config.decay_rate ** lr_decays_so_far
+        print('current learning rate: %f' % self.sess.run(self.lr))
 
     def set_input_pipeline(self, streams=None):
-        if self.config.dataset in ['mnist', 'cifar10']:
-            path = os.path.join(self.data_dir, self.dataset_name)
-            data_X, data_y = getattr(load, self.config.dataset)(path)
-        elif self.config.dataset in ['celebA']:
-            files = glob(os.path.join(self.data_dir, self.dataset_name, '*.jpg'))
+        if self.dataset in ['mnist', 'cifar10']:
+            path = os.path.join(self.data_dir, self.dataset)
+            data_X, data_y = getattr(load, self.dataset)(path)
+        elif self.dataset in ['celebA']:
+            files = glob(os.path.join(self.data_dir, self.dataset, '*.jpg'))
             data_X = np.array([get_image(f, 144, 144, resize_height=self.output_size, 
                                          resize_width=self.output_size) for f in files[:]])
-        elif self.config.dataset == 'GaussianMix':
+        elif self.dataset == 'GaussianMix':
             G_config = {'g_line': None}
             path = os.path.join(self.sample_dir, self.description)
             data_X, G_config['ax1'], G_config['writer'] = load.GaussianMix(path)
             G_config['fig'] = G_config['ax1'].figure
             self.G_config = G_config
         else:
-            raise ValueError("not implemented dataset '%s'" % self.config.dataset)
+            raise ValueError("not implemented dataset '%s'" % self.dataset)
         if streams is None:
             streams = [self.real_batch_size]
         streams = np.cumsum(streams)
@@ -464,7 +484,7 @@ class MMD_GAN(object):
         bs = streams[-1]
         read_batch = max(20000, bs * 10)
 
-        self.files = glob(os.path.join(self.data_dir, self.dataset_name, '*.jpg'))
+        self.files = glob(os.path.join(self.data_dir, self.dataset, '*.jpg'))
         self.read_count = 0
         def get_read_batch(k, limit=read_batch):
             with tf.device('/cpu:0'):
@@ -510,15 +530,63 @@ class MMD_GAN(object):
         self.images = ims[:streams[0]]
         for j in np.arange(1, len(streams)):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
+ 
+    def set_tf_records_pipeline(self, streams=None):     
+        from tensorflow import gfile
+        if streams is None:
+            streams = [self.real_batch_size]
+        streams = np.cumsum(streams)
+        bs = streams[-1]
+        read_batch = max(100, self.real_batch_size * 20)
+
+        with tf.device(
+                tf.train.replica_device_setter(0, worker_device='/cpu:0')):
+            filename_queue = tf.train.string_input_producer(
+                gfile.Glob('/nfs/nhome/live/dougals/lsun-32'), num_epochs=None)
+            reader = tf.TFRecordReader()
+            _, serialized_example = reader.read(filename_queue)
+            features = tf.parse_single_example(
+                serialized_example,
+                features={
+                    "image_raw": tf.FixedLenFeature([], tf.string),
+                    "height": tf.FixedLenFeature([], tf.int64),
+                    "width": tf.FixedLenFeature([], tf.int64),
+                    "depth": tf.FixedLenFeature([], tf.int64)
+                })
+            image = tf.decode_raw(features["image_raw"], tf.uint8)
+            height = tf.reshape((features["height"], tf.int64)[0], [1])
+            height = tf.cast(height, tf.int32)
+            width = tf.reshape((features["width"], tf.int64)[0], [1])
+            width = tf.cast(width, tf.int32)
+            depth = tf.reshape((features["depth"], tf.int64)[0], [1])
+            depth = tf.cast(depth, tf.int32)
+            image = tf.reshape(image, tf.concat([height, width, depth], 0))
             
-            
+            print('HWD: ' + repr((height, width, depth)))
+
+
+            single_sample = image
+            single_sample.set_shape([self.output_size, self.output_size, self.c_dim])
+            print('pipeline 0')
+            ims = tf.train.shuffle_batch([single_sample], bs,
+                                                capacity=max(bs * 8, read_batch * 4),
+                                                min_after_dequeue=max(bs * 2, read_batch//2),
+                                                num_threads=16,
+                                                enqueue_many=False)
+            print('pipeline 1')
+            self.images = ims[:streams[0]]
+            for j in np.arange(1, len(streams)):
+                self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
+                
+            self.additional_sample_images = self.sess.run(self.images)
+                   
     def set_lmdb_pipeline(self, streams=None):
         if streams is None:
             streams = [self.real_batch_size]
         streams = np.cumsum(streams)
         bs = streams[-1]
 
-        data_dir = os.path.join(self.data_dir, self.dataset_name)
+        data_dir = os.path.join(self.data_dir, self.dataset)
         keys = []
         read_batch = max(10000, self.real_batch_size * 20)
         # getting keys in database
@@ -545,7 +613,9 @@ class MMD_GAN(object):
                     cursor.set_key(key)
                     while len(ims) < limit:
                         key, byte_arr = cursor.item()
-                        im = Image.open(io.BytesIO(byte_arr))
+                        byte_im = io.BytesIO(byte_arr)
+                        byte_im.seek(0)
+                        im = Image.open(byte_im)
                         ims.append(center_and_scale(im, size=self.output_size))
                         if not cursor.next():
                             cursor.first()
@@ -640,9 +710,9 @@ class MMD_GAN(object):
     def generator(self, z, y=None, is_train=True, reuse=False, batch_size=None):
         if batch_size is None:
             batch_size = self.batch_size
-        if self.config.dataset not in ['mnist', 'cifar10', 'lsun', 'GaussianMix', 'celebA']:
-            raise ValueError("not implemented dataset '%s'" % self.config.dataset)
-        elif self.config.dataset in ['lsun', 'cifar10']:
+        if self.dataset not in ['mnist', 'cifar10', 'lsun', 'GaussianMix', 'celebA']:
+            raise ValueError("not implemented dataset '%s'" % self.dataset)
+        elif self.dataset in ['lsun', 'cifar10']:
             if self.config.architecture == 'mlp':
                 return self.MLP_generator(z, is_train=is_train, reuse=reuse)
         with tf.variable_scope('generator') as scope:
@@ -761,19 +831,64 @@ class MMD_GAN(object):
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(sess=self.sess, coord=coord)        
         step = 0
-        while step < self.config.max_iteration:
+        while step <= self.config.max_iteration:
             g_loss, d_loss, step = self.train_step()
             self.save_samples(step)
-            if self.config.dataset == 'GaussianMix':
+            if self.dataset == 'GaussianMix':
                 self.make_video(step, self.G_config, g_loss)
-        if self.config.dataset == 'GaussianMix':
+        if self.dataset == 'GaussianMix':
             self.G_config['writer'].finish()   
             
         coord.request_stop()
         coord.join(threads)
-        self.sess.close()
         
+        
+    def compute_scores(self, step):
+        if step % self.scoring['frequency'] != 0:
+            return
+        tt = time.time()
+        print("[%d][%f] Scoring start" % (step, time.time() - self.start_time))
+        output = {}
+        images4score = self.get_samples(n=self.scoring['size'], save=False)
+        if self.dataset == 'mnist': #LeNet model takes [-.5, .5] pics
+            images4score -= .5
+            if (images4score.max() > .5) or (images4score.min() < -.5):
+                print('WARNING! LeNet min/max violated: min, max = ', images4score.min(), images4score.max())
+                images4score = images4score.clip(-.5, .5)
+        else: #Inception model takes [0 , 255] pics
+            images4score *= 255.0
+            if (images4score.max() > 255.) or (images4score.min() < .0):
+                print('WARNING! Inception min/max violated: min, max = ', images4score.min(), images4score.max())
+                images4score = images4score.clip(0., 255.)
                 
+        preds, codes = featurize(images4score, self.scoring['model'],
+                                 get_preds=True, get_codes=True)
+        print("[%d][%.1f] featurizing finished" % (step, \
+              time.time() - self.start_time))
+        
+        output['inception'] = scores = inception_score(preds)
+        print("[%d][%.1f] Inception mean (std): %f (%f)" % (step, \
+              time.time() - self.start_time, np.mean(scores), np.std(scores)))
+        
+        output['fid'] = scores = fid_score(codes, self.scoring['train_codes'], 
+                                           split_method='bootstrap',
+                                           splits=3)
+        print("[%d][%.1f] FID mean (std): %f (%f)" % (step, \
+              time.time() - self.start_time, np.mean(scores), np.std(scores)))
+        
+        ret = polynomial_mmd_averages(codes, self.scoring['train_codes'], 
+                                n_subsets=10, subset_size=1000, 
+                                ret_var=False)
+        output['mmd2'] = mmd2s = ret
+        print("[%d][%.1f] KID mean (std): %f (%f)" % (step, \
+              time.time() - self.start_time, mmd2s.mean(), mmd2s.std()))           
+        
+        self.scoring['output'].append(output)
+        
+        path = os.path.join(self.sample_dir, 'score%d.npz' % step)
+        np.savez(path, **output)
+        print("[%d][%f] Scoring end, total time = %.1f s" % (step, time.time() - self.start_time, time.time() - tt))
+
     def sampling(self, config):
         self.sess.run(tf.local_variables_initializer())
         self.sess.run(tf.global_variables_initializer())
@@ -804,25 +919,19 @@ class MMD_GAN(object):
 
     def save(self, checkpoint_dir, step):
         model_name = "MMDGAN.model"
-        checkpoint_dir = os.path.join(checkpoint_dir, self.description)
-
-        if not os.path.exists(checkpoint_dir):
-            os.makedirs(checkpoint_dir)
+        self._ensure_dirs('checkpoint')
 
         self.saver.save(self.sess,
-                        os.path.join(checkpoint_dir, model_name),
+                        os.path.join(self.checkpoint_dir, model_name),
                         global_step=step)
 
 
     def load(self, checkpoint_dir):
         print(" [*] Reading checkpoints...")
-
-        checkpoint_dir = os.path.join(checkpoint_dir, self.description)
-
-        ckpt = tf.train.get_checkpoint_state(checkpoint_dir)
+        ckpt = tf.train.get_checkpoint_state(self.checkpoint_dir)
         if ckpt and ckpt.model_checkpoint_path:
             ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-            self.saver.restore(self.sess, os.path.join(checkpoint_dir, ckpt_name))
+            self.saver.restore(self.sess, os.path.join(self.checkpoint_dir, ckpt_name))
             return True
         else:
             return False
@@ -843,14 +952,12 @@ class MMD_GAN(object):
             self.save(self.checkpoint_dir, step)
             samples = self.sess.run(self.sampler)
             print(samples.shape)
-            sample_dir = os.path.join(self.sample_dir, self.description)
-            if not os.path.exists(sample_dir):
-                os.makedirs(sample_dir)
-            p = os.path.join(sample_dir, 'train_{:02d}.png'.format(step))
+            self._ensure_dirs('sample')
+            p = os.path.join(self.sample_dir, 'train_{:02d}.png'.format(step))
             save_images(samples[:64, :, :, :], [8, 8], p)  
             
     def get_samples(self, n=None, save=True):
-        if not self.initialized_for_sampling:
+        if not (self.initialized_for_sampling or self.config.is_train):
             print('[*] Loading from ' + self.checkpoint_dir + '...')
             self.sess.run(tf.local_variables_initializer())
             self.sess.run(tf.global_variables_initializer())
@@ -868,7 +975,7 @@ class MMD_GAN(object):
         samples = np.concatenate(sampled, axis=0)[:n]
         if not save:
             return samples
-        file = os.path.join(self.sample_dir, self.description, 'samples.npy')
+        file = os.path.join(self.sample_dir, 'samples.npy')
         np.save(file, samples, allow_pickle=False)
         print(" [*] %d samples saved in '%s'" % (n, file))
     

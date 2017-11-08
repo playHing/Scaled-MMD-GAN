@@ -8,8 +8,10 @@ import tensorflow as tf
 from tf_ops import dot, sq_sum
 
 
-_eps=1e-5
+_eps=1.0e-5
 _check_numerics=False
+
+mysqrt = lambda x: tf.sqrt(tf.maximum(x + _eps, 0.))
 
 ################################################################################
 ### Quadratic-time MMD with Gaussian RBF kernel
@@ -28,7 +30,6 @@ def _distance_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
 
     r = lambda x: tf.expand_dims(x, 0)
     c = lambda x: tf.expand_dims(x, 1)
-    mysqrt = lambda x: tf.sqrt(tf.maximum(x + _eps, 0.))
 
     K_XY = c(mysqrt(X_sqnorms)) + r(mysqrt(Y_sqnorms)) - mysqrt(-2 * XY + c(X_sqnorms) + r(Y_sqnorms))
 
@@ -106,7 +107,7 @@ def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None,
     return K_XX, K_XY, K_YY, tf.reduce_sum(wts)
 
 
-def _mix_rq_kernel(X, Y, alphas=[.001, .01, .1, 1.0, 10.0], wts=None, 
+def _mix_rq_kernel(X, Y, alphas=[.2, .5, .1, 2., 5.], wts=None, 
                    K_XY_only=False, check_numerics=_check_numerics):
     """
     Rational quadratic kernel
@@ -355,3 +356,98 @@ def _mmd2_and_variance(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
     )
 
     return mmd2, var_est
+
+def _diff_mmd2_and_ratio(K_XY, K_XZ, K_YY, K_ZZ, const_diagonal=False):
+    m = tf.cast(K_YY.get_shape()[0], tf.float32)  # Assumes X, Y, Z are same shape
+
+    ### Get the various sums of kernels that we'll use
+    # Kts drop the diagonal, but we don't need to explicitly form them
+    if const_diagonal is not False:
+        const_diagonal = tf.cast(const_diagonal, tf.float32)
+        diag_Y = diag_Z = const_diagonal
+#        sum_diag_Y = sum_diag_Z = m * const_diagonal
+        sum_diag2_Y = sum_diag2_Z = m * const_diagonal**2    
+    else:
+        diag_Y = tf.diag_part(K_YY)
+        diag_Z = tf.diag_part(K_ZZ)
+
+        sum_diag2_Y = sq_sum(diag_Y)
+        sum_diag2_Z = sq_sum(diag_Z)
+    
+    Kt_YY_sums = tf.reduce_sum(K_YY, 1) - diag_Y
+    Kt_YY_sum = tf.reduce_sum(Kt_YY_sums)
+
+    Kt_ZZ_sums = tf.reduce_sum(K_ZZ, 1) - diag_Z
+    Kt_ZZ_sum = tf.reduce_sum(Kt_ZZ_sums)
+
+    K_XY_sums_0 = tf.reduce_sum(K_XY, 0)
+    K_XY_sums_1 = tf.reduce_sum(K_XY, 1)
+    
+    K_XZ_sums_0 = tf.reduce_sum(K_XZ, 0)
+    K_XZ_sums_1 = tf.reduce_sum(K_XZ, 1)
+    
+    K_XY_sum = tf.reduce_sum(K_XY_sums_0)
+    K_XZ_sum = tf.reduce_sum(K_XZ_sums_0)
+
+    # TODO: turn these into dot products?
+    # should figure out if that's faster or not on GPU / with theano...
+    Kt_YY_2_sum = sq_sum(K_YY) - sum_diag2_Y
+    Kt_ZZ_2_sum = sq_sum(K_ZZ) - sum_diag2_Z
+    K_XY_2_sum  = sq_sum(K_XY)
+    K_XZ_2_sum  = sq_sum(K_XZ)
+
+    ### Estimators for the various terms involved
+    muY_muY = Kt_YY_sum / (m * (m-1))
+    muZ_muZ = Kt_ZZ_sum / (m * (m-1))
+
+    muX_muY = K_XY_sum / (m * m)
+    muX_muZ = K_XZ_sum / (m * m)
+
+    E_y_muY_sq = (sq_sum(Kt_YY_sums) - Kt_YY_2_sum) / (m*(m-1)*(m-2))
+    E_z_muZ_sq = (sq_sum(Kt_ZZ_sums) - Kt_ZZ_2_sum) / (m*(m-1)*(m-2))
+
+    E_x_muY_sq = (sq_sum(K_XY_sums_1) - K_XY_2_sum) / (m*m*(m-1))
+    E_x_muZ_sq = (sq_sum(K_XZ_sums_1) - K_XZ_2_sum) / (m*m*(m-1))
+
+    E_y_muX_sq = (sq_sum(K_XY_sums_0) - K_XY_2_sum) / (m*m*(m-1))
+    E_z_muX_sq = (sq_sum(K_XZ_sums_0) - K_XZ_2_sum) / (m*m*(m-1))
+
+    E_y_muY_y_muX = dot(Kt_YY_sums, K_XY_sums_0) / (m*m*(m-1))
+    E_z_muZ_z_muX = dot(Kt_ZZ_sums, K_XZ_sums_0) / (m*m*(m-1))
+
+    E_x_muY_x_muZ = dot(K_XY_sums_1, K_XZ_sums_1) / (m*m*m)
+
+    E_kyy2 = Kt_YY_2_sum / (m * (m-1))
+    E_kzz2 = Kt_ZZ_2_sum / (m * (m-1))
+
+    E_kxy2 = K_XY_2_sum / (m * m)
+    E_kxz2 = K_XZ_2_sum / (m * m)
+
+
+    ### Combine into overall estimators
+    mmd2_diff = muY_muY - 2 * muX_muY - muZ_muZ + 2 * muX_muZ
+
+    first_order = 4 * (m-2) / (m * (m-1)) * (
+          E_y_muY_sq - muY_muY**2
+        + E_x_muY_sq - muX_muY**2
+        + E_y_muX_sq - muX_muY**2
+        + E_z_muZ_sq - muZ_muZ**2
+        + E_x_muZ_sq - muX_muZ**2
+        + E_z_muX_sq - muX_muZ**2
+        - 2 * E_y_muY_y_muX + 2 * muY_muY * muX_muY
+        - 2 * E_x_muY_x_muZ + 2 * muX_muY * muX_muZ
+        - 2 * E_z_muZ_z_muX + 2 * muZ_muZ * muX_muZ
+    )
+    second_order = 2 / (m * (m-1)) * (
+          E_kyy2 - muY_muY**2
+        + 2 * E_kxy2 - 2 * muX_muY**2
+        + E_kzz2 - muZ_muZ**2
+        + 2 * E_kxz2 - 2 * muX_muZ**2
+        - 4 * E_y_muY_y_muX + 4 * muY_muY * muX_muY
+        - 4 * E_x_muY_x_muZ + 4 * muX_muY * muX_muZ
+        - 4 * E_z_muZ_z_muX + 4 * muZ_muZ * muX_muZ
+    )
+    var_est = first_order + second_order
+
+    ratio = mmd2_diff / mysqrt(tf.maximum(var_est, _eps))
+    return mmd2_diff, ratio

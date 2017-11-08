@@ -10,11 +10,16 @@ import scipy.misc
 import numpy as np
 from time import gmtime, strftime
 import tensorflow as tf
+from mmd import _eps
 
 from six.moves import xrange
 
 pp = pprint.PrettyPrinter()
 
+def safer_norm(tensor, axis=None, keep_dims=False, epsilon=_eps):
+    sq = tf.square(tensor)
+    squares = tf.reduce_sum(sq, axis=axis, keep_dims=keep_dims)
+    return tf.sqrt(squares + epsilon)
 
 def inverse_transform(images):
     return (images+1.)/2.

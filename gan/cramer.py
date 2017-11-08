@@ -3,7 +3,7 @@ from mmd import _eps
 
 from model_mmd2 import MMD_GAN, tf, np
 from model_me_brb import MEbrb_GAN
-from utils import variable_summaries
+from utils import variable_summaries, safer_norm
 from cholesky import me_loss
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from glob import glob
@@ -83,12 +83,12 @@ class Cramer_GAN(MMD_GAN):
             x_hat_data = tf.check_numerics(x_hat_data, 'x_hat_data')
         x_hat = self.discriminator(x_hat_data, reuse=True, batch_size=bs)
         
-        critic = lambda x, x_ : tf.norm(x - x_, axis=1) - tf.norm(x, axis=1) 
+        critic = lambda x, x_ : safer_norm(x - x_, axis=1) - safer_norm(x, axis=1) 
         
         with tf.variable_scope('loss'):
             if self.config.model == 'deepmind_cramer': # Cramer GAN paper
                 self.g_loss = tf.reduce_mean(
-                    - tf.norm(G - G2, axis=1) + tf.norm(G - images, axis=1) + tf.norm(G2 - images, axis=1))
+                    - safer_norm(G - G2, axis=1) + safer_norm(G - images, axis=1) + safer_norm(G2 - images, axis=1))
                 self.d_loss = -tf.reduce_mean(critic(images, G) - critic(G2, G))
                 to_penalize = critic(x_hat, G)
                 
@@ -98,24 +98,24 @@ class Cramer_GAN(MMD_GAN):
                 to_penalize = critic(x_hat, G)
                 
             elif self.config.model == 'better_cramer':  # as proposed by Arthur          
-                S_PQ = tf.reduce_mean(1/2 * tf.norm(G - G2, axis=1) - tf.norm(G - images, axis=1))
+                S_PQ = tf.reduce_mean(1/2 * safer_norm(G - G2, axis=1) - safer_norm(G - images, axis=1))
                 if self.check_numerics:
                     S_PQ = tf.check_numerics(S_PQ, 'better_S_PQ')
                 self.g_loss = -S_PQ # miminize divergence ~ max expected score S_PQ ~ min -S_PQ
-                self.d_loss = S_PQ + tf.reduce_mean(tf.norm(images, axis=1))
+                self.d_loss = S_PQ + tf.reduce_mean(safer_norm(images, axis=1))
                 if self.check_numerics:
                     self.d_loss= tf.check_numerics(self.d_loss, 'better_self.d_loss')
-                to_penalize = 1/2 * tf.norm(x_hat - G2, axis=1) - tf.norm(x_hat - images, axis=1)
+                to_penalize = 1/2 * safer_norm(x_hat - G2, axis=1) - safer_norm(x_hat - images, axis=1)
                 if self.check_numerics:
                     to_penalize = tf.check_numerics(to_penalize, 'better_to_penalize')
                 
             elif self.config.model == 'cramer_no_hy':
-                S_PQ = tf.reduce_mean(1/2 * tf.norm(G - G2, axis=1) - tf.norm(G - images, axis=1))
+                S_PQ = tf.reduce_mean(1/2 * safer_norm(G - G2, axis=1) - safer_norm(G - images, axis=1))
                 if self.check_numerics:
                     S_PQ = tf.check_numerics(S_PQ, 'no_hy_S_PQ')
                 self.g_loss = -S_PQ # miminize divergence ~ max expected score S_PQ ~ min -S_PQ
                 self.d_loss = S_PQ
-                to_penalize = 1/2 * tf.norm(x_hat - G2, axis=1) - tf.norm(x_hat - images, axis=1)
+                to_penalize = 1/2 * safer_norm(x_hat - G2, axis=1) - safer_norm(x_hat - images, axis=1)
                 if self.check_numerics:
                     to_penalize = tf.check_numerics(to_penalize, 'no_hy_to_penalize')
             else:
@@ -126,9 +126,9 @@ class Cramer_GAN(MMD_GAN):
                 gradients = tf.check_numerics(gradients, 'gradients 0')
             
             if self.check_numerics:  
-                penalty = tf.check_numerics(tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0)), 'penalty')
+                penalty = tf.check_numerics(tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0)), 'penalty')
             else:
-                penalty = tf.reduce_mean(tf.square(tf.norm(gradients, axis=1) - 1.0))#
+                penalty = tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0))#
 
         
             self.gp = tf.get_variable('gradient_penalty', dtype=tf.float32,
