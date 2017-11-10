@@ -10,6 +10,7 @@ flags = tf.app.flags
 flags.DEFINE_integer("max_iteration", 400000, "Epoch to train [400000]")
 flags.DEFINE_float("learning_rate", 2, "Learning rate [2]")
 flags.DEFINE_float("learning_rate_D", -1, "Learning rate for discriminator, if negative same as generator [-1]")
+flags.DEFINE_boolean("MMD_lr_scheduler", True, "Wheather to use lr scheduler based on 3-sample test")
 flags.DEFINE_float("decay_rate", .5, "Decay rate [1.0]")
 flags.DEFINE_float("gp_decay_rate", .5, "Decay rate [1.0]")
 flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")

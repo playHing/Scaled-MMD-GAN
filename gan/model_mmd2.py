@@ -5,6 +5,7 @@ import time
 
 import numpy as np
 import scipy.misc
+import scipy
 from six.moves import xrange
 import tensorflow as tf
 import matplotlib.pyplot as plt
@@ -48,13 +49,15 @@ class MMD_GAN(object):
         if config.compute_scores:
             if self.dataset == 'mnist':
                 mod = LeNet()
-                s, f = 100000, 500
+                s, f = 100000, 50
             else:
                 mod = Inception()
                 s, f = 25000, 1000
             arr = np.load(os.path.join(data_dir, self.dataset + '-codes.npy'))
             self.scoring = {'model': mod, 'train_codes': arr[:s], 'output': [], 
                             'frequency': f, 'size': s}
+            if config.MMD_lr_scheduler:
+                self.scoring['3sample'] = []
             
         self.sess = sess
 
@@ -395,8 +398,9 @@ class MMD_GAN(object):
                     % (step, time.time() - self.start_time, 
                        self.optim_name, g_loss, d_loss))
             if np.mod(step + 1, self.config.max_iteration//5) == 0:
-                self.lr *= self.config.decay_rate
-                print('current learning rate: %f' % self.sess.run(self.lr))
+                if not self.config.MMD_lr_scheduler:
+                    self.lr *= self.config.decay_rate
+                    print('current learning rate: %f' % self.sess.run(self.lr))
                 if ('decay_gp' in self.config.suffix) and (self.config.gradient_penalty > 0):
                     self.gp *= self.config.gp_decay_rate
                     print('current gradient penalty: %f' % self.sess.run(self.gp))
@@ -430,9 +434,9 @@ class MMD_GAN(object):
         else:
             print(" [!] Load failed...")
         
-        step = self.sess.run(self.global_step)
-        lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
-        self.lr *= self.config.decay_rate ** lr_decays_so_far
+#        step = self.sess.run(self.global_step)
+#        lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
+#        self.lr *= self.config.decay_rate ** lr_decays_so_far
         print('current learning rate: %f' % self.sess.run(self.lr))
 
     def set_input_pipeline(self, streams=None):
@@ -887,6 +891,34 @@ class MMD_GAN(object):
         
         path = os.path.join(self.sample_dir, 'score%d.npz' % step)
         np.savez(path, **output)
+        
+        if self.config.MMD_lr_scheduler:
+            n = int(self.config.max_iteration//10)
+            bs = 2048
+            new_Y = codes[:bs]
+            X = self.scoring['train_codes'][:bs]
+            
+            if len(self.scoring['3sample']) >= 1:
+                saved_Z = self.scoring['3sample'][0]
+                mmd2_diff, test_stat, Z_related_sums = \
+                    MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, saved_Z)
+                p_val = scipy.stats.norm.cdf(-test_stat)
+                print("[%d][%f] 3-sample test stat = %.1f" % (step, time.time() - self.start_time, test_stat))
+                print("[%d][%f] 3-sample p-value = %.1f" % (step, time.time() - self.start_time, p_val))
+                if p_val < .05:
+                    # new Y sample is no closer than old Z
+                    self.lr *= self.config.decay_rate
+                    print('Decreasing learning rate to %f' % self.sess.run(self.lr))
+                    
+                    self.scoring['3sample'] = [Z_related_sums] # reset memorized sums
+                else:
+                    self.scoring['3sample'] = self.scoring['3sample'][1:] + [Z_related_sums]
+            else: # add new sums to memory
+                self.scoring['3sample'].append(
+                    MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, None)
+                )
+                print("[%d][%f] computing stats for 3-sample test finished" % (step, time.time() - self.start_time))    
+                
         print("[%d][%f] Scoring end, total time = %.1f s" % (step, time.time() - self.start_time, time.time() - tt))
 
     def sampling(self, config):

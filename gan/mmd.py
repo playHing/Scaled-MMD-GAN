@@ -4,6 +4,7 @@ MMD functions implemented in tensorflow.
 from __future__ import division
 
 import tensorflow as tf
+import numpy as np
 
 from tf_ops import dot, sq_sum
 
@@ -357,44 +358,55 @@ def _mmd2_and_variance(K_XX, K_XY, K_YY, const_diagonal=False, biased=False):
 
     return mmd2, var_est
 
+
+def diff_polynomial_mmd2_and_ratio(X, Y, Z):
+    dim = tf.cast(X.get_shape()[1], tf.float32)
+    # TODO: could definitely do this faster
+    K_XY = (tf.matmul(X, Y, transpose_b=True) / dim + 1) ** 3
+    K_XZ = (tf.matmul(X, Z, transpose_b=True) / dim + 1) ** 3
+    K_YY = (tf.matmul(Y, Y, transpose_b=True) / dim + 1) ** 3
+    K_ZZ = (tf.matmul(Z, Z, transpose_b=True) / dim + 1) ** 3
+    return _diff_mmd2_and_ratio(K_XY, K_XZ, K_YY, K_ZZ, const_diagonal=False)
+
+
+def diff_polynomial_mmd2_and_ratio_with_saving(X, Y, saved_sums_for_Z):
+    dim = tf.cast(X.get_shape()[1], tf.float32)
+    # TODO: could definitely do this faster
+    K_XY = (tf.matmul(X, Y, transpose_b=True) / dim + 1) ** 3
+    K_YY = (tf.matmul(Y, Y, transpose_b=True) / dim + 1) ** 3
+    m = tf.cast(K_YY.get_shape()[0], tf.float32)
+    
+    Y_related_sums = _get_sums(K_XY, K_YY)
+    
+    mmd2_diff, ratio = _diff_mmd2_and_ratio_from_sums(Y_related_sums, saved_sums_for_Z, m)
+    
+    return mmd2_diff, ratio, Y_related_sums
+    
+
 def _diff_mmd2_and_ratio(K_XY, K_XZ, K_YY, K_ZZ, const_diagonal=False):
     m = tf.cast(K_YY.get_shape()[0], tf.float32)  # Assumes X, Y, Z are same shape
 
     ### Get the various sums of kernels that we'll use
     # Kts drop the diagonal, but we don't need to explicitly form them
-    if const_diagonal is not False:
-        const_diagonal = tf.cast(const_diagonal, tf.float32)
-        diag_Y = diag_Z = const_diagonal
-#        sum_diag_Y = sum_diag_Z = m * const_diagonal
-        sum_diag2_Y = sum_diag2_Z = m * const_diagonal**2    
-    else:
-        diag_Y = tf.diag_part(K_YY)
-        diag_Z = tf.diag_part(K_ZZ)
+    return _diff_mmd2_and_ratio_from_sums(
+        _get_sums(K_XY, K_YY, const_diagonal),
+        _get_sums(K_XZ, K_ZZ, const_diagonal),
+        m,
+        const_diagonal=const_diagonal
+    )
 
-        sum_diag2_Y = sq_sum(diag_Y)
-        sum_diag2_Z = sq_sum(diag_Z)
+def _diff_mmd2_and_ratio_from_sums(Y_related_sums, Z_related_sums, m, const_diagonal=False):
+    Kt_YY_sums, Kt_YY_2_sum, K_XY_sums_0, K_XY_sums_1, K_XY_2_sum = Y_related_sums
+    Kt_ZZ_sums, Kt_ZZ_2_sum, K_XZ_sums_0, K_XZ_sums_1, K_XZ_2_sum = Z_related_sums
     
-    Kt_YY_sums = tf.reduce_sum(K_YY, 1) - diag_Y
     Kt_YY_sum = tf.reduce_sum(Kt_YY_sums)
-
-    Kt_ZZ_sums = tf.reduce_sum(K_ZZ, 1) - diag_Z
     Kt_ZZ_sum = tf.reduce_sum(Kt_ZZ_sums)
-
-    K_XY_sums_0 = tf.reduce_sum(K_XY, 0)
-    K_XY_sums_1 = tf.reduce_sum(K_XY, 1)
-    
-    K_XZ_sums_0 = tf.reduce_sum(K_XZ, 0)
-    K_XZ_sums_1 = tf.reduce_sum(K_XZ, 1)
     
     K_XY_sum = tf.reduce_sum(K_XY_sums_0)
     K_XZ_sum = tf.reduce_sum(K_XZ_sums_0)
 
     # TODO: turn these into dot products?
     # should figure out if that's faster or not on GPU / with theano...
-    Kt_YY_2_sum = sq_sum(K_YY) - sum_diag2_Y
-    Kt_ZZ_2_sum = sq_sum(K_ZZ) - sum_diag2_Z
-    K_XY_2_sum  = sq_sum(K_XY)
-    K_XZ_2_sum  = sq_sum(K_XZ)
 
     ### Estimators for the various terms involved
     muY_muY = Kt_YY_sum / (m * (m-1))
@@ -451,3 +463,144 @@ def _diff_mmd2_and_ratio(K_XY, K_XZ, K_YY, K_ZZ, const_diagonal=False):
 
     ratio = mmd2_diff / mysqrt(tf.maximum(var_est, _eps))
     return mmd2_diff, ratio
+
+
+def _get_sums(K_XY, K_YY, const_diagonal=False):
+    m = tf.cast(K_YY.get_shape()[0], tf.float32)  # Assumes X, Y, Z are same shape
+
+    ### Get the various sums of kernels that we'll use
+    # Kts drop the diagonal, but we don't need to explicitly form them
+    if const_diagonal is not False:
+        const_diagonal = tf.cast(const_diagonal, tf.float32)
+        diag_Y = const_diagonal
+        sum_diag2_Y = m * const_diagonal**2    
+    else:
+        diag_Y = tf.diag_part(K_YY)
+
+        sum_diag2_Y = sq_sum(diag_Y)
+    
+    Kt_YY_sums = tf.reduce_sum(K_YY, 1) - diag_Y
+
+    K_XY_sums_0 = tf.reduce_sum(K_XY, 0)
+    K_XY_sums_1 = tf.reduce_sum(K_XY, 1)
+
+    # TODO: turn these into dot products?
+    # should figure out if that's faster or not on GPU / with theano...
+    Kt_YY_2_sum = sq_sum(K_YY) - sum_diag2_Y
+    K_XY_2_sum  = sq_sum(K_XY)
+    
+    return Kt_YY_sums, Kt_YY_2_sum, K_XY_sums_0, K_XY_sums_1, K_XY_2_sum
+
+
+def np_diff_polynomial_mmd2_and_ratio_with_saving(X, Y, saved_sums_for_Z):
+    dim = float(X.shape[1])
+    # TODO: could definitely do this faster
+    K_XY = (np.dot(X, Y.transpose()) / dim + 1) ** 3
+    K_YY = (np.dot(Y, Y.transpose()) / dim + 1) ** 3
+    m = float(K_YY.shape[0])
+    
+    Y_related_sums = _np_get_sums(K_XY, K_YY)
+    
+    if saved_sums_for_Z is None:
+        return Y_related_sums
+    
+    mmd2_diff, ratio = _np_diff_mmd2_and_ratio_from_sums(Y_related_sums, saved_sums_for_Z, m)
+    
+    return mmd2_diff, ratio, Y_related_sums
+
+
+def _np_diff_mmd2_and_ratio_from_sums(Y_related_sums, Z_related_sums, m, const_diagonal=False):
+    Kt_YY_sums, Kt_YY_2_sum, K_XY_sums_0, K_XY_sums_1, K_XY_2_sum = Y_related_sums
+    Kt_ZZ_sums, Kt_ZZ_2_sum, K_XZ_sums_0, K_XZ_sums_1, K_XZ_2_sum = Z_related_sums
+    
+    Kt_YY_sum = (Kt_YY_sums**2).sum()
+    Kt_ZZ_sum = (Kt_ZZ_sums**2).sum()
+    
+    K_XY_sum = K_XY_sums_0.sum()
+    K_XZ_sum = K_XZ_sums_0.sum()
+
+    # TODO: turn these into dot products?
+    # should figure out if that's faster or not on GPU / with theano...
+
+    ### Estimators for the various terms involved
+    muY_muY = Kt_YY_sum / (m * (m-1))
+    muZ_muZ = Kt_ZZ_sum / (m * (m-1))
+
+    muX_muY = K_XY_sum / (m * m)
+    muX_muZ = K_XZ_sum / (m * m)
+
+    E_y_muY_sq = ((Kt_YY_sums**2).sum() - Kt_YY_2_sum) / (m*(m-1)*(m-2))
+    E_z_muZ_sq = ((Kt_ZZ_sums**2).sum() - Kt_ZZ_2_sum) / (m*(m-1)*(m-2))
+
+    E_x_muY_sq = ((K_XY_sums_1**2).sum() - K_XY_2_sum) / (m*m*(m-1))
+    E_x_muZ_sq = ((K_XZ_sums_1**2).sum() - K_XZ_2_sum) / (m*m*(m-1))
+
+    E_y_muX_sq = ((K_XY_sums_0**2).sum() - K_XY_2_sum) / (m*m*(m-1))
+    E_z_muX_sq = ((K_XZ_sums_0**2).sum() - K_XZ_2_sum) / (m*m*(m-1))
+
+    E_y_muY_y_muX = np.dot(Kt_YY_sums, K_XY_sums_0) / (m*m*(m-1))
+    E_z_muZ_z_muX = np.dot(Kt_ZZ_sums, K_XZ_sums_0) / (m*m*(m-1))
+
+    E_x_muY_x_muZ = np.dot(K_XY_sums_1, K_XZ_sums_1) / (m*m*m)
+
+    E_kyy2 = Kt_YY_2_sum / (m * (m-1))
+    E_kzz2 = Kt_ZZ_2_sum / (m * (m-1))
+
+    E_kxy2 = K_XY_2_sum / (m * m)
+    E_kxz2 = K_XZ_2_sum / (m * m)
+
+
+    ### Combine into overall estimators
+    mmd2_diff = muY_muY - 2 * muX_muY - muZ_muZ + 2 * muX_muZ
+
+    first_order = 4 * (m-2) / (m * (m-1)) * (
+          E_y_muY_sq - muY_muY**2
+        + E_x_muY_sq - muX_muY**2
+        + E_y_muX_sq - muX_muY**2
+        + E_z_muZ_sq - muZ_muZ**2
+        + E_x_muZ_sq - muX_muZ**2
+        + E_z_muX_sq - muX_muZ**2
+        - 2 * E_y_muY_y_muX + 2 * muY_muY * muX_muY
+        - 2 * E_x_muY_x_muZ + 2 * muX_muY * muX_muZ
+        - 2 * E_z_muZ_z_muX + 2 * muZ_muZ * muX_muZ
+    )
+    second_order = 2 / (m * (m-1)) * (
+          E_kyy2 - muY_muY**2
+        + 2 * E_kxy2 - 2 * muX_muY**2
+        + E_kzz2 - muZ_muZ**2
+        + 2 * E_kxz2 - 2 * muX_muZ**2
+        - 4 * E_y_muY_y_muX + 4 * muY_muY * muX_muY
+        - 4 * E_x_muY_x_muZ + 4 * muX_muY * muX_muZ
+        - 4 * E_z_muZ_z_muX + 4 * muZ_muZ * muX_muZ
+    )
+    var_est = first_order + second_order
+
+    ratio = mmd2_diff / np.sqrt(max(var_est, _eps))
+    return mmd2_diff, ratio
+
+
+def _np_get_sums(K_XY, K_YY, const_diagonal=False):
+    m = float(K_YY.shape[0])  # Assumes X, Y, Z are same shape
+
+    ### Get the various sums of kernels that we'll use
+    # Kts drop the diagonal, but we don't need to explicitly form them
+    if const_diagonal is not False:
+        const_diagonal = float(const_diagonal)
+        diag_Y = const_diagonal
+        sum_diag2_Y = m * const_diagonal**2    
+    else:
+        diag_Y = np.diag(K_YY)
+
+        sum_diag2_Y = (diag_Y**2).sum()
+    
+    Kt_YY_sums = K_YY.sum(axis=1) - diag_Y
+
+    K_XY_sums_0 = K_XY.sum(axis=0)
+    K_XY_sums_1 = K_XY.sum(axis=1)
+
+    # TODO: turn these into dot products?
+    # should figure out if that's faster or not on GPU / with theano...
+    Kt_YY_2_sum = (K_YY**2).sum() - sum_diag2_Y
+    K_XY_2_sum  = (K_XY**2).sum()
+    
+    return Kt_YY_sums, Kt_YY_2_sum, K_XY_sums_0, K_XY_sums_1, K_XY_2_sum
