@@ -11,6 +11,7 @@ from tf_ops import dot, sq_sum
 
 _eps=1.0e-5
 _check_numerics=False
+_debug = False
 
 mysqrt = lambda x: tf.sqrt(tf.maximum(x + _eps, 0.))
 
@@ -513,8 +514,8 @@ def _np_diff_mmd2_and_ratio_from_sums(Y_related_sums, Z_related_sums, m, const_d
     Kt_YY_sums, Kt_YY_2_sum, K_XY_sums_0, K_XY_sums_1, K_XY_2_sum = Y_related_sums
     Kt_ZZ_sums, Kt_ZZ_2_sum, K_XZ_sums_0, K_XZ_sums_1, K_XZ_2_sum = Z_related_sums
     
-    Kt_YY_sum = (Kt_YY_sums**2).sum()
-    Kt_ZZ_sum = (Kt_ZZ_sums**2).sum()
+    Kt_YY_sum = Kt_YY_sums.sum()
+    Kt_ZZ_sum = Kt_ZZ_sums.sum()
     
     K_XY_sum = K_XY_sums_0.sum()
     K_XZ_sum = K_XZ_sums_0.sum()
@@ -529,14 +530,14 @@ def _np_diff_mmd2_and_ratio_from_sums(Y_related_sums, Z_related_sums, m, const_d
     muX_muY = K_XY_sum / (m * m)
     muX_muZ = K_XZ_sum / (m * m)
 
-    E_y_muY_sq = ((Kt_YY_sums**2).sum() - Kt_YY_2_sum) / (m*(m-1)*(m-2))
-    E_z_muZ_sq = ((Kt_ZZ_sums**2).sum() - Kt_ZZ_2_sum) / (m*(m-1)*(m-2))
+    E_y_muY_sq = (np.dot(Kt_YY_sums, Kt_YY_sums) - Kt_YY_2_sum) / (m*(m-1)*(m-2))
+    E_z_muZ_sq = (np.dot(Kt_ZZ_sums, Kt_ZZ_sums) - Kt_ZZ_2_sum) / (m*(m-1)*(m-2))
 
-    E_x_muY_sq = ((K_XY_sums_1**2).sum() - K_XY_2_sum) / (m*m*(m-1))
-    E_x_muZ_sq = ((K_XZ_sums_1**2).sum() - K_XZ_2_sum) / (m*m*(m-1))
+    E_x_muY_sq = (np.dot(K_XY_sums_1, K_XY_sums_1) - K_XY_2_sum) / (m*m*(m-1))
+    E_x_muZ_sq = (np.dot(K_XZ_sums_1, K_XZ_sums_1) - K_XZ_2_sum) / (m*m*(m-1))
 
-    E_y_muX_sq = ((K_XY_sums_0**2).sum() - K_XY_2_sum) / (m*m*(m-1))
-    E_z_muX_sq = ((K_XZ_sums_0**2).sum() - K_XZ_2_sum) / (m*m*(m-1))
+    E_y_muX_sq = (np.dot(K_XY_sums_0, K_XY_sums_0) - K_XY_2_sum) / (m*m*(m-1))
+    E_z_muX_sq = (np.dot(K_XZ_sums_0, K_XZ_sums_0) - K_XZ_2_sum) / (m*m*(m-1))
 
     E_y_muY_y_muX = np.dot(Kt_YY_sums, K_XY_sums_0) / (m*m*(m-1))
     E_z_muZ_z_muX = np.dot(Kt_ZZ_sums, K_XZ_sums_0) / (m*m*(m-1))
@@ -591,7 +592,7 @@ def _np_get_sums(K_XY, K_YY, const_diagonal=False):
     else:
         diag_Y = np.diag(K_YY)
 
-        sum_diag2_Y = (diag_Y**2).sum()
+        sum_diag2_Y = np.dot(diag_Y, diag_Y)
     
     Kt_YY_sums = K_YY.sum(axis=1) - diag_Y
 
@@ -600,7 +601,7 @@ def _np_get_sums(K_XY, K_YY, const_diagonal=False):
 
     # TODO: turn these into dot products?
     # should figure out if that's faster or not on GPU / with theano...
-    Kt_YY_2_sum = (K_YY**2).sum() - sum_diag2_Y
-    K_XY_2_sum  = (K_XY**2).sum()
+    Kt_YY_2_sum = (K_YY ** 2).sum() - sum_diag2_Y
+    K_XY_2_sum  = (K_XY ** 2).sum()
     
     return Kt_YY_sums, Kt_YY_2_sum, K_XY_sums_0, K_XY_sums_1, K_XY_2_sum

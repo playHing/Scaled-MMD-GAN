@@ -20,7 +20,7 @@ import load
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from utils import *
 import pprint
-from mmd import _eps, _check_numerics
+from mmd import _eps, _check_numerics, _debug
 
 from compute_scores import *
 
@@ -49,7 +49,7 @@ class MMD_GAN(object):
         if config.compute_scores:
             if self.dataset == 'mnist':
                 mod = LeNet()
-                s, f = 100000, 50
+                s, f = 100000, 500
             else:
                 mod = Inception()
                 s, f = 25000, 1000
@@ -58,6 +58,7 @@ class MMD_GAN(object):
                             'frequency': f, 'size': s}
             if config.MMD_lr_scheduler:
                 self.scoring['3sample'] = []
+                self.scoring['3sample_chances'] = 0
             
         self.sess = sess
 
@@ -174,7 +175,9 @@ class MMD_GAN(object):
 
     def build_model(self):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        self.lr = tf.get_variable('lr', dtype=tf.float32, initializer=self.config.learning_rate)
+        self.lr = tf.Variable(self.config.learning_rate, name='lr', 
+                                  trainable=False, dtype=tf.float32)
+        self.lr_decay_op = self.lr.assign(tf.maximum(self.lr * self.config.decay_rate, 1.e-7))
         if 'lsun' in self.dataset:
             self.set_lmdb_pipeline()
         elif self.dataset == 'celebA':
@@ -200,13 +203,19 @@ class MMD_GAN(object):
         self.sampler = self.generator(self.sample_z, is_train=False, reuse=True)
         
         if self.config.dc_discriminator:
-            images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
-            G = self.discriminator(self.G, reuse=True)
+            self.d_images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
+            self.d_G = self.discriminator(self.G, reuse=True)
         else:
-            images = tf.reshape(self.images, [self.real_batch_size, -1])
-            G = tf.reshape(self.G, [self.batch_size, -1])
-
-        self.set_loss(G, images)
+            self.d_images = tf.reshape(self.images, [self.real_batch_size, -1])
+            self.d_G = tf.reshape(self.G, [self.batch_size, -1])
+        
+        if _debug:
+            variable_summaries([(self.d_images, 'Dreal'), (self.d_G, 'Dfake')])
+            tf.summary.scalar('norm_Dfake', tf.norm(self.d_G))
+            tf.summary.scalar('nomr_Dreal', tf.norm(self.d_images))
+            tf.summary.scalar('norm_diff_Dreal_Dfake', tf.norm(self.d_G - self.d_images))
+            
+        self.set_loss(self.d_G, self.d_images)
 
         block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
         tf.summary.image("train/input image", 
@@ -244,6 +253,10 @@ class MMD_GAN(object):
             kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
             
         kerGI = kernel(G, images)
+        
+        if _debug:
+            variable_summaries([(kerGI[0], 'K_XX'), (kerGI[1], 'K_XY'), (kerGI[2], 'K_YY')])
+            
         with tf.variable_scope('loss'):
             if self.config.model in ['mmd', 'mmd_gan']:
                 self.mmd_loss = MMD.mmd2(kerGI)
@@ -292,12 +305,17 @@ class MMD_GAN(object):
             if self.check_numerics:
                 x_hat = tf.check_numerics(x_hat, 'x_hat')
             Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
-            witness = Ekx(real) - Ekx(fake)
+            Ekxr, Ekxf = Ekx(real), Ekx(fake)
+            witness = Ekxr - Ekxf
             if self.check_numerics:
                 witness = tf.check_numerics(witness, 'witness')
             gradients = tf.gradients(witness, [x_hat_data])[0]
             if self.check_numerics:
                 gradients = tf.check_numerics(gradients, 'gradients 0')
+            if _debug:
+                tf.summary.scalar('norm_witness_mid', tf.norm(witness))
+                tf.summary.scalar('norm_Ekx_real', tf.norm(Ekxr))
+                tf.summary.scalar('norm_Ekx_fake', tf.norm(Ekxf))
         elif self.config.gp_type == 'wgan':
             alpha = tf.reshape(alpha, [bs, 1, 1, 1])
             real_data = self.images #before discirminator
@@ -315,8 +333,9 @@ class MMD_GAN(object):
         print('adding gradient penalty')
         with tf.variable_scope('loss'):
             if self.config.gradient_penalty > 0:
-                self.gp = tf.get_variable('gradient_penalty', dtype=tf.float32,
-                                          initializer=self.config.gradient_penalty)
+                self.gp = tf.Variable(self.config.gradient_penalty, 
+                                      name='gradient_penalty', 
+                                      trainable=False, dtype=tf.float32)
                 self.g_loss = self.mmd_loss
                 self.d_loss = -self.mmd_loss + penalty * self.gp
                 self.optim_name += ' gp %.1f' % self.config.gradient_penalty
@@ -326,6 +345,11 @@ class MMD_GAN(object):
             tf.summary.scalar(self.optim_name + ' G', self.g_loss)
             tf.summary.scalar(self.optim_name + ' D', self.d_loss)
             tf.summary.scalar('dx_penalty', penalty)
+            
+            if self.config.L2_discriminator_penalty > 0:
+                self.d_loss += self.d_L2_penalty
+                self.optim_name += ' L2 dp %.6f' % self.config.L2_discriminator_penalty
+                tf.summary.scalar('L2_disc_penalty', self.d_L2_penalty)
         
     def set_grads(self):
         with tf.variable_scope("G_grads"):
@@ -397,12 +421,18 @@ class MMD_GAN(object):
                 print("Epoch: [%2d] time: %4.4f, %s, G: %.8f, D: %.8f"
                     % (step, time.time() - self.start_time, 
                        self.optim_name, g_loss, d_loss))
+                if self.config.L2_discriminator_penalty > 0:
+                    print('D_L2 penalty: %.8f' % self.sess.run(self.d_L2_penalty))
+                if _debug:
+                    print('discriminator output, real[0:3] ', self.sess.run(self.d_images)[:3])
+                    print('discriminator output, fake[0:3] ', self.sess.run(self.d_images)[:3])
             if np.mod(step + 1, self.config.max_iteration//5) == 0:
                 if not self.config.MMD_lr_scheduler:
-                    self.lr *= self.config.decay_rate
+#                    self.lr *= self.config.decay_rate
+                    self.sess.run(self.lr_decay_op)
                     print('current learning rate: %f' % self.sess.run(self.lr))
                 if ('decay_gp' in self.config.suffix) and (self.config.gradient_penalty > 0):
-                    self.gp *= self.config.gp_decay_rate
+                    self.sess.run(self.gp.assign(self.gp * self.config.gp_decay_rate))
                     print('current gradient penalty: %f' % self.sess.run(self.gp))
         
             if self.config.compute_scores:
@@ -430,14 +460,20 @@ class MMD_GAN(object):
         self.d_counter, self.g_counter, self.err_counter = 0, 0, 0
         
         if self.load(self.checkpoint_dir):
-            print(" [*] Load SUCCESS, re-starting at epoch %d" % self.sess.run(self.global_step))
+            print(""" [*] Load SUCCESS, re-starting at epoch %d with learning
+                  rate %.7f""" % (self.sess.run(self.global_step), 
+                                  self.sess.run(self.lr)))
         else:
             print(" [!] Load failed...")
-        
-#        step = self.sess.run(self.global_step)
-#        lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
-#        self.lr *= self.config.decay_rate ** lr_decays_so_far
-        print('current learning rate: %f' % self.sess.run(self.lr))
+        self.lr *= self.config.decay_rate
+        if (not self.config.MMD_lr_scheduler) and (self.sess.run(self.gp) == self.config.gradient_penalty):
+            step = self.sess.run(self.global_step)
+            lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
+            self.lr *= self.config.decay_rate ** lr_decays_so_far
+            if 'decay_gp' in self.config.suffix:
+                self.gp *= self.config.gp_decay_rate ** lr_decays_so_far
+                print('current gradient penalty: %f' % self.sess.run(self.gp))
+        print('current learning rate: %f' % self.sess.run(self.lr))    
 
     def set_input_pipeline(self, streams=None):
         if self.dataset in ['mnist', 'cifar10']:
@@ -658,6 +694,7 @@ class MMD_GAN(object):
         if batch_size is None:
             batch_size = self.batch_size
         with tf.variable_scope("discriminator") as scope:
+            outputs = []
             if reuse:
                 scope.reuse_variables()
             if 'dcgan' in self.config.architecture: # default architecture
@@ -694,6 +731,7 @@ class MMD_GAN(object):
                 h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
                 h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
                 hF = linear(tf.reshape(h4, [batch_size, -1]), self.dof_dim, 'd_h6_lin')
+                outputs += [(h4, 'h4')]
             elif 'dc128' in self.config.architecture:
                 if self.dof_dim <= 0:
                     self.dof_dim = self.df_dim * 32
@@ -704,10 +742,24 @@ class MMD_GAN(object):
                 h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
                 h5 = lrelu(self.d_bn5(conv2d(h4, self.df_dim * 32, name='d_h5_conv')))
                 hF = linear(tf.reshape(h5, [batch_size, -1]), self.dof_dim , 'd_h6_lin')
+                outputs += [(h4, 'h4'), (h5, 'h5')]
             else:
                 raise ValueError("Choose architecture from  [dfc, dcold, dcgan, dc64, dc128]")
             print(repr(image.get_shape()).replace('Dimension', '') + ' --> Discriminator --> ' + \
                   repr(hF.get_shape()).replace('Dimension', ''))
+            
+            outputs = [(h0, 'h0'), (h1, 'h1'), (h2, 'h2'), 
+                       (h3, 'h3')] + outputs + [(hF, 'hF')]
+                       
+            if self.config.L2_discriminator_penalty > 0:
+                penalty = 0.0
+                for layer in outputs:
+                    penalty += tf.reduce_mean(tf.square(layer[0]))
+                self.d_L2_penalty = penalty * self.config.L2_discriminator_penalty
+            
+            if _debug:
+                variable_summaries(outputs)
+                
             return hF
 
         
@@ -893,26 +945,36 @@ class MMD_GAN(object):
         np.savez(path, **output)
         
         if self.config.MMD_lr_scheduler:
-            n = int(self.config.max_iteration//10)
+            n = 10
+            nc = 3
             bs = 2048
             new_Y = codes[:bs]
             X = self.scoring['train_codes'][:bs]
-            
-            if len(self.scoring['3sample']) >= 1:
+            print('3-sample stats so far: %d' % len(self.scoring['3sample']))
+            if len(self.scoring['3sample']) >= n:
                 saved_Z = self.scoring['3sample'][0]
-                mmd2_diff, test_stat, Z_related_sums = \
+                mmd2_diff, test_stat, Y_related_sums = \
                     MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, saved_Z)
-                p_val = scipy.stats.norm.cdf(-test_stat)
+                p_val = scipy.stats.norm.cdf(test_stat)
                 print("[%d][%f] 3-sample test stat = %.1f" % (step, time.time() - self.start_time, test_stat))
                 print("[%d][%f] 3-sample p-value = %.1f" % (step, time.time() - self.start_time, p_val))
-                if p_val < .05:
-                    # new Y sample is no closer than old Z
-                    self.lr *= self.config.decay_rate
-                    print('Decreasing learning rate to %f' % self.sess.run(self.lr))
-                    
-                    self.scoring['3sample'] = [Z_related_sums] # reset memorized sums
+                if p_val > .1:
+                    self.scoring['3sample_chances'] += 1
+                    if self.scoring['3sample_chances'] >= nc:
+                        # no confidence that new Y sample is closer to X than old Z is
+                        self.sess.run(self.lr_decay_op)
+                        print('No improvement in last %d tests. Decreasing learning rate to %f' % \
+                              (nc, self.sess.run(self.lr)))
+                        self.scoring['3sample'] = (self.scoring['3sample'] + [Y_related_sums])[-nc:] # reset memorized sums
+                        self.scoring['3sample_chances'] = 0
+                    else:
+                        print('No improvement in last %d test(s). Keeping learning rate at %f' % \
+                              (self.scoring['3sample_chances'], self.sess.run(self.lr)))
                 else:
-                    self.scoring['3sample'] = self.scoring['3sample'][1:] + [Z_related_sums]
+                    # we're confident that new_Y is better than old_Z is
+                    print('Keeping learning rate at %f' % self.sess.run(self.lr))
+                    self.scoring['3sample'] = self.scoring['3sample'][1:] + [Y_related_sums]
+                    self.scoring['3sample_chances'] = 0
             else: # add new sums to memory
                 self.scoring['3sample'].append(
                     MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, None)

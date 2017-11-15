@@ -50,6 +50,7 @@ flags.DEFINE_string("gp_type", 'data_space', "type of gradient penalty ['data_sp
 flags.DEFINE_string("single_batch_experiment", False, "wheater to train on a constant single batch with constant gp evaluation points")
 flags.DEFINE_boolean('compute_scores', False, "Compute scores")
 flags.DEFINE_float("gpu_mem", .9, "GPU memory fraction limit [1.0]")
+flags.DEFINE_float("L2_discriminator_penalty", 0.0, "L2 penalty on discriminator features [0.0]")
 FLAGS = flags.FLAGS
 
 def main(_):
