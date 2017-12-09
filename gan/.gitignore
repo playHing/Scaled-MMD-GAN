@@ -6,8 +6,6 @@
 /*.pyc
 /run*.sh
 /temp*
-/tf_*
 /*cluster*
 /data
 /__pycache__
-/load.py
