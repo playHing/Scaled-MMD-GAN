@@ -28,6 +28,7 @@ flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image sam
 flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
 flags.DEFINE_string("architecture", "dc", "The name of the architecture [dc, mlp, dfc]")
 flags.DEFINE_string("kernel", "", "The name of the architecture ['', 'mix_rbf', 'mix_rq', 'distance', 'dot']")
+flags.DEFINE_string("d_kernel", "", "The name of the architecture ['', 'mix_rbf', 'mix_rq', 'distance', 'dot']")
 flags.DEFINE_string("model", "mmd", "The name of the kernel loss model [mmd, tmmd, me]")
 flags.DEFINE_boolean("dc_discriminator", False, "use deep convolutional discriminator [True]")
 flags.DEFINE_boolean("is_train", False, "True for training, False for testing [False]")
@@ -51,6 +52,11 @@ flags.DEFINE_string("single_batch_experiment", False, "wheater to train on a con
 flags.DEFINE_boolean('compute_scores', False, "Compute scores")
 flags.DEFINE_float("gpu_mem", .9, "GPU memory fraction limit [1.0]")
 flags.DEFINE_float("L2_discriminator_penalty", 0.0, "L2 penalty on discriminator features [0.0]")
+flags.DEFINE_string("Loss_variance", "", "which loss variance to monitor")
+flags.DEFINE_integer("no_of_samples", 100000, "number of samples to produce")
+flags.DEFINE_boolean("print_pca", False, "")
+flags.DEFINE_boolean("save_layer_outputs", False, "")
+flags.DEFINE_integer("witness_update_frequency", 100, "")
 FLAGS = flags.FLAGS
 
 def main(_):
@@ -78,6 +84,10 @@ def main(_):
         from model_gan import GAN as model
     elif FLAGS.model == 'wgan_gp':
         from model_wgan_gp import GAN as model
+    elif FLAGS.model == 'stream_mmd':
+        from stream_mmd import Stream_MMD_GAN as model
+    elif FLAGS.model == 'fix_witness':
+        from fix_witness import FixWitness as model
     elif 'cramer' in FLAGS.model:
         from cramer import Cramer_GAN as model
 
@@ -102,8 +112,11 @@ def main(_):
             
         if FLAGS.is_train:
             dcgan.train()
+        elif FLAGS.print_pca:
+            dcgan.print_pca()
         else:
-            dcgan.get_samples(100000)
+            dcgan.get_samples(FLAGS.no_of_samples, layer_features=[-1])
+        
 
         if FLAGS.visualize:
             to_json("./web/js/layers.js", [dcgan.h0_w, dcgan.h0_b, dcgan.g_bn0],

@@ -14,14 +14,11 @@ import time
 class Cramer_GAN(MMD_GAN):                   
     def build_model(self):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
-        self.lr = tf.get_variable('lr', dtype=tf.float32, initializer=self.config.learning_rate)
-        if 'lsun' in self.config.dataset:
-            self.set_lmdb_pipeline()
-        elif 'celebA' in self.config.dataset:
-            self.set_input3_pipeline()
-        else:
-            self.set_input_pipeline()
-
+        self.lr = tf.Variable(self.config.learning_rate, name='lr', 
+                                  trainable=False, dtype=tf.float32)
+        self.lr_decay_op = self.lr.assign(tf.maximum(self.lr * self.config.decay_rate, 1.e-7))
+        
+        self.set_pipeline()
 
         self.sample_z = tf.constant(np.random.uniform(-1, 1, size=(self.sample_size,
                                                       self.z_dim)).astype(np.float32),
@@ -41,13 +38,13 @@ class Cramer_GAN(MMD_GAN):
         if self.config.dc_discriminator:
             images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
             G2 = self.discriminator(self.G2, reuse=True)
-            G = self.discriminator(self.G, reuse=True)
+            self.d_G = self.discriminator(self.G, reuse=True)
         else:
             images = tf.reshape(self.images, [self.real_batch_size, -1])
-            G = tf.reshape(self.G, [self.batch_size, -1])
+            self.d_G = tf.reshape(self.G, [self.batch_size, -1])
             G2 = tf.reshape(self.G2, [self.batch_size, -1])
 
-        self.set_loss(G, G2, images)
+        self.set_loss(self.d_G, G2, images)
 
         block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
         tf.summary.image("train/input image",
@@ -59,6 +56,11 @@ class Cramer_GAN(MMD_GAN):
 
         self.d_vars = [var for var in t_vars if 'd_' in var.name]
         self.g_vars = [var for var in t_vars if 'g_' in var.name]
+
+        if 'distance' in self.config.Loss_variance:
+            self.Loss_variance = Loss_variance(self.sess, self.dof_dim, 
+                                               lambda x, bs: self.discriminator(x, batch_size=bs, reuse=True),
+                                               kernel_name='distance')
 
         self.saver = tf.train.Saver(max_to_keep=2)
         

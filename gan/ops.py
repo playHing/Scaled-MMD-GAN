@@ -103,7 +103,7 @@ def conv2d(input_, output_dim,
         conv = tf.reshape(tf.nn.bias_add(conv, biases), conv.get_shape())
         
         if not has_summary:
-            variable_summaries([(w, 'W'), (biases, 'b')])    
+            variable_summaries({'W': w, 'b': biases})    
         
         return conv
 
@@ -138,7 +138,7 @@ def deconv2d(input_, output_shape,
             deconv = tf.check_numerics(deconv, 'deconv_%s_output' % name)
         
         if not has_summary:
-            variable_summaries([(w, 'W'), (biases, 'b')])
+            variable_summaries({'W': w, 'b': biases})
             
         if with_w:
             return deconv, w, biases
@@ -163,7 +163,7 @@ def linear(input_, output_size, name="Linear", stddev=0.01, bias_start=0.0, with
             initializer=tf.constant_initializer(bias_start))
         
         if not has_summary:
-            variable_summaries([(matrix, 'W'), (bias, 'b')])
+            variable_summaries({'W': matrix, 'b': bias})
         
         if with_w:
             return tf.matmul(input_, matrix) + bias, matrix, bias

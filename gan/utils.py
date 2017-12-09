@@ -11,6 +11,7 @@ import numpy as np
 from time import gmtime, strftime
 import tensorflow as tf
 from mmd import _eps
+import time
 
 from six.moves import xrange
 
@@ -278,9 +279,9 @@ def variable_summary(var, name):
 #    tf.summary.scalar(name + '_norm', tf.sqrt(tf.reduce_mean(tf.square(var))))
     tf.summary.histogram(name + '_histogram', var)
         
-def variable_summaries(vars_and_names):
-    for vn in vars_and_names:
-        variable_summary(vn[0], vn[1])        
+def variable_summaries(variable_dict):
+    for name, var in variable_dict.items():
+        variable_summary(var, name)        
         
 def conv_sizes(size, layers, stride=2):
     s = [int(size)]
@@ -320,3 +321,41 @@ def transform(image, input_height, input_width,
     else:
         cropped_image = scipy.misc.imresize(image, [resize_height, resize_width])
     return np.array(cropped_image)/127.5 - 1.
+
+class Loss_variance(object):
+    def __init__(self, sess, dim, critic, kernel_name='distance', 
+                  batch_sizes=[16, 128, 1024], bootstrap_samples=10):
+        import mmd 
+        kernel = getattr(mmd, '_%s_kernel' % kernel_name)
+        self.loss = {}
+        self.kernel_name = kernel_name
+        self.bootstrap_samples = bootstrap_samples
+        self.sess = sess
+        self.history = {}
+        for bs in batch_sizes:
+            r = tf.Variable(np.zeros((bs, dim)), name='real%d' % bs, 
+                            trainable=False, dtype=tf.float32)
+            f = tf.Variable(np.zeros((bs, dim)), name='fake%d' % bs, 
+                            trainable=False, dtype=tf.float32) 
+            self.loss[bs] = mmd.mmd2(kernel(critic(r), critic(f)))
+            self.history[bs] = []
+    
+    def __call__(self, real, fake, mess=''):
+        t0 = time.time()
+        for bs, loss in self.loss.items():
+            assert fake.shape[0] >= self.bootstrap_samples * bs, 'too few generated samples' 
+            assert real.shape[0] >= self.bootstrap_samples * bs, 'too few real samples' 
+            losses = []
+            for i in range(self.bootstrap_samples):
+                feed_dict = {'real%d' % bs: real[i*bs: (i+1)*bs],
+                             'fake%d' % bs: fake[i*bs: (i+1)*bs]}
+                losses.append(self.sess.run(loss, feed_dict=feed_dict))
+            mean, std = losses.mean(), losses.std()
+            print('%s %s loss for batch size %d: %.5f (%.5f)' % (mess, 
+                  self.kernel_name, bs, mean, std))
+            self.history[bs].append((mean, std))
+        print('%s loss variance evaluation time: %.1f' % mess, time.time() - t0)
+        
+        
+    
+    

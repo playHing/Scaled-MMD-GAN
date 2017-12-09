@@ -45,29 +45,32 @@ class MMD_GAN(object):
         self.start_time = time.time()
         self.check_numerics = _check_numerics
         self.dataset = config.dataset
-        
-        if config.compute_scores:
-            if self.dataset == 'mnist':
-                mod = LeNet()
-                s, f = 100000, 500
-            else:
-                mod = Inception()
-                s, f = 25000, 1000
-            arr = np.load(os.path.join(data_dir, self.dataset + '-codes.npy'))
-            self.scoring = {'model': mod, 'train_codes': arr[:s], 'output': [], 
-                            'frequency': f, 'size': s}
-            if config.MMD_lr_scheduler:
-                self.scoring['3sample'] = []
-                self.scoring['3sample_chances'] = 0
-            
-        self.sess = sess
-
         if config.architecture == 'dc128':
             output_size = 128
         elif config.output_size == 128:
             config.architecture = 'dc128'
         if config.architecture in ['dc64', 'dcgan64']:
             output_size = 64
+            
+        if config.compute_scores:
+            self.scorer = Scorer(self.dataset, config.MMD_lr_scheduler)
+#            if self.dataset == 'mnist':
+#                mod = LeNet()
+#                s, f = 100000, 500
+#            else:
+#                mod = Inception()
+#                s, f = 25000, 2000
+#            os = '' if (output_size <= 32) else ('-%d' % output_size)
+#            path = os.path.join(data_dir, '%s-codes%s.npy' % (self.dataset, os))
+#            arr = np.load(path)
+#            self.scoring = {'model': mod, 'train_codes': arr[:s], 'output': [], 
+#                            'frequency': f, 'size': s}
+#            if config.MMD_lr_scheduler:
+#                self.scoring['3sample'] = []
+#                self.scoring['3sample_chances'] = 0
+            
+        self.sess = sess
+
 #        elif config.output_size == 64:
 #            config.architecture = 'dc64'
         if config.real_batch_size == -1:
@@ -76,7 +79,7 @@ class MMD_GAN(object):
         self.is_grayscale = (c_dim == 1)
         self.batch_size = batch_size
         self.real_batch_size = config.real_batch_size
-        self.sample_size = batch_size
+        self.sample_size = 64 if self.config.is_train else batch_size
 #        if self.dataset == 'GaussianMix':
 #            self.sample_size = min(16 * batch_size, 512)
         self.output_size = output_size
@@ -129,11 +132,14 @@ class MMD_GAN(object):
         else:
             lr = 'lr%.8fG%fD' % (self.config.learning_rate, self.config.learning_rate_D)
         arch = '%dx%d' % (self.config.gf_dim, self.config.df_dim)
-
+        
+        kernel_name = self.config.kernel
+        if self.config.d_kernel != "":
+            kernel_name += '-D' + self.config.d_kernel
         self.description = ("%s%s_%s%s_%s%sd%d-%d-%d_%s_%s_%s" % (
                     self.dataset, arch,
                     self.config.architecture, discriminator_desc,
-                    self.config.kernel, dwc, self.config.dsteps,
+                    kernel_name, dwc, self.config.dsteps,
                     self.config.start_dsteps, self.config.gsteps, self.batch_size,
                     self.output_size, lr))
         
@@ -177,13 +183,15 @@ class MMD_GAN(object):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.lr = tf.Variable(self.config.learning_rate, name='lr', 
                                   trainable=False, dtype=tf.float32)
-        self.lr_decay_op = self.lr.assign(tf.maximum(self.lr * self.config.decay_rate, 1.e-7))
-        if 'lsun' in self.dataset:
-            self.set_lmdb_pipeline()
-        elif self.dataset == 'celebA':
-            self.set_input3_pipeline()
-        else:
-            self.set_input_pipeline()
+        self.lr_decay_op = self.lr.assign(tf.maximum(self.lr * self.config.decay_rate, 1.e-6))
+        with tf.variable_scope('loss'):
+            if self.config.is_train and (self.config.gradient_penalty > 0):
+                self.gp = tf.Variable(self.config.gradient_penalty, 
+                                      name='gradient_penalty', 
+                                      trainable=False, dtype=tf.float32)
+                self.gp_decay_op = self.gp.assign(self.gp * self.config.gp_decay_rate)
+
+        self.set_pipeline()
 
         self.z = tf.random_uniform([self.batch_size, self.z_dim], minval=-1., 
                                    maxval=1., dtype=tf.float32, name='z')
@@ -200,22 +208,28 @@ class MMD_GAN(object):
         
         if self.check_numerics:
             self.G = tf.check_numerics(self.G, 'self.G')
-        self.sampler = self.generator(self.sample_z, is_train=False, reuse=True)
+        self.sampler = self.generator(self.sample_z, is_train=False, reuse=True, 
+                                      batch_size=self.sample_size)
         
         if self.config.dc_discriminator:
-            self.d_images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
-            self.d_G = self.discriminator(self.G, reuse=True)
+            self.d_images_layers = self.discriminator(self.images, reuse=False, 
+                        batch_size=self.real_batch_size, return_layers=True)
+            self.d_G_layers = self.discriminator(self.G, reuse=True,
+                                                 return_layers=True)
+            self.d_images = self.d_images_layers['hF']
+            self.d_G = self.d_G_layers['hF']
         else:
             self.d_images = tf.reshape(self.images, [self.real_batch_size, -1])
             self.d_G = tf.reshape(self.G, [self.batch_size, -1])
         
         if _debug:
-            variable_summaries([(self.d_images, 'Dreal'), (self.d_G, 'Dfake')])
+            variable_summaries({'Dreal': self.d_images, 'Dfake': self.d_G})
             tf.summary.scalar('norm_Dfake', tf.norm(self.d_G))
             tf.summary.scalar('nomr_Dreal', tf.norm(self.d_images))
             tf.summary.scalar('norm_diff_Dreal_Dfake', tf.norm(self.d_G - self.d_images))
             
-        self.set_loss(self.d_G, self.d_images)
+        if self.config.is_train:
+            self.set_loss(self.d_G, self.d_images)
 
         block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
         tf.summary.image("train/input image", 
@@ -229,6 +243,15 @@ class MMD_GAN(object):
         self.g_vars = [var for var in t_vars if 'g_' in var.name]
 
         self.saver = tf.train.Saver(max_to_keep=2)
+
+        if 'distance' in self.config.Loss_variance:
+            self.Loss_variance = Loss_variance(
+                self.sess, self.dof_dim, 
+                lambda x, bs: self.discriminator(x, batch_size=bs, reuse=True),
+                kernel_name='distance'
+            )
+            
+        print('[*] Model built.')
 
     def set_loss(self, G, images):
         if self.check_numerics:
@@ -255,21 +278,28 @@ class MMD_GAN(object):
         kerGI = kernel(G, images)
         
         if _debug:
-            variable_summaries([(kerGI[0], 'K_XX'), (kerGI[1], 'K_XY'), (kerGI[2], 'K_YY')])
+            variable_summaries({'K_XX': kerGI[0], 'K_XY': kerGI[1], 'K_YY': kerGI[2]})
             
         with tf.variable_scope('loss'):
             if self.config.model in ['mmd', 'mmd_gan']:
-                self.mmd_loss = MMD.mmd2(kerGI)
+                self.g_loss = MMD.mmd2(kerGI)
+                if self.config.d_kernel != '':
+                    DkerGI = getattr(MMD, '_%s_kernel' % self.config.d_kernel)(G, images)
+                    self.d_loss = -MMD.mmd2(DkerGI)
+                else:
+                    self.d_loss = -self.g_loss 
                 self.optim_name = 'kernel_loss'
             elif self.config.model == 'tmmd':
                 kl, rl, var_est = MMD.mmd2_and_ratio(kerGI)
-                self.mmd_loss = rl
+                self.g_loss = rl
                 self.optim_name = 'ratio_loss'
                 tf.summary.scalar("kernel_loss", kl)#tf.sqrt(kl + _eps))
                 tf.summary.scalar("variance_estimate", var_est)
             
         self.add_gradient_penalty(kernel, G, images)
+        self.add_l2_penalty()
         
+        print('[*] Loss set')
 
     def add_gradient_penalty(self, kernel, fake, real):
         bs = min([self.batch_size, self.real_batch_size])
@@ -286,7 +316,7 @@ class MMD_GAN(object):
                                     [bs]), tf.float32)
             alpha = .1 * alpha * qq + (1. - .1 * alpha) * (1. - qq)
         elif 'edge' in self.config.suffix:
-            alpha = .99 + .01 * alpha
+            alpha = .95 + .05 * alpha
 
         if self.config.gp_type == 'feature_space':
             alpha = tf.reshape(alpha, [bs, 1])
@@ -329,27 +359,28 @@ class MMD_GAN(object):
         else:
             penalty = tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0))#
 
-        
-        print('adding gradient penalty')
         with tf.variable_scope('loss'):
             if self.config.gradient_penalty > 0:
-                self.gp = tf.Variable(self.config.gradient_penalty, 
-                                      name='gradient_penalty', 
-                                      trainable=False, dtype=tf.float32)
-                self.g_loss = self.mmd_loss
-                self.d_loss = -self.mmd_loss + penalty * self.gp
+#                self.g_loss = self.mmd_loss
+                self.d_loss += penalty * self.gp
                 self.optim_name += ' gp %.1f' % self.config.gradient_penalty
-            else:
-                self.g_loss = self.mmd_loss
-                self.d_loss = -self.mmd_loss
+                tf.summary.scalar('dx_penalty', penalty)
+                print('[*] Gradient penalty added')
             tf.summary.scalar(self.optim_name + ' G', self.g_loss)
             tf.summary.scalar(self.optim_name + ' D', self.d_loss)
-            tf.summary.scalar('dx_penalty', penalty)
-            
-            if self.config.L2_discriminator_penalty > 0:
-                self.d_loss += self.d_L2_penalty
-                self.optim_name += ' L2 dp %.6f' % self.config.L2_discriminator_penalty
-                tf.summary.scalar('L2_disc_penalty', self.d_L2_penalty)
+        
+    def add_l2_penalty(self):
+        if self.config.L2_discriminator_penalty > 0:
+            penalty = 0.0
+            for _, layer in self.d_G_layers.items():
+                penalty += tf.reduce_mean(tf.reshape(tf.square(layer), [self.batch_size, -1]), axis=1)
+            for _, layer in self.d_images_layers.items():
+                penalty += tf.reduce_mean(tf.reshape(tf.square(layer), [self.batch_size, -1]), axis=1)
+            self.d_L2_penalty = self.config.L2_discriminator_penalty * tf.reduce_mean(penalty)
+            self.d_loss += self.d_L2_penalty
+            self.optim_name += ' L2 dp %.6f' % self.config.L2_discriminator_penalty
+            tf.summary.scalar('L2_disc_penalty', self.d_L2_penalty)
+            print('[*] L2 discriminator penalty added')
         
     def set_grads(self):
         with tf.variable_scope("G_grads"):
@@ -382,13 +413,23 @@ class MMD_GAN(object):
                     self.d_vars = [tf.clip_by_value(d_var, -dclip, dclip) 
                                        for d_var in self.d_vars]
         else:
-            self.d_grads = None                
+            self.d_grads = None      
+        print('[*] Gradients set')
     
     def train_step(self, batch_images=None):
         step = self.sess.run(self.global_step)
         write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
                 or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
+
+        if (self.g_counter == 0) and (self.d_grads is not None):
+            d_steps = self.config.dsteps
+            if ((step % 500 == 0) or (step < 20)):
+                d_steps = self.config.start_dsteps
+            self.d_counter = (self.d_counter + 1) % (d_steps + 1)
+        if self.d_counter == 0:
+            self.g_counter = (self.g_counter + 1) % self.config.gsteps        
         # write_summary=True
+
         eval_ops = [self.g_gvs, self.d_gvs, self.g_loss, self.d_loss]
         if self.config.is_demo:
             summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
@@ -406,9 +447,10 @@ class MMD_GAN(object):
                 _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
             et = "g step" if (self.d_counter == 0) else "d step"
             et += ", epoch: [%2d] time: %4.4f" % (step, time.time() - self.start_time)
+#        print('[*] Training step: gradients computed.')
         assert ~np.isnan(g_loss), "NaN g_loss, epoch: " + et
         assert ~np.isnan(d_loss), "NaN d_loss, epoch: " + et  
-        # if G STEP
+        # if G STEP, after D steps
         if self.d_counter == 0:
             if step % 10000 == 0:
                 try:
@@ -432,26 +474,29 @@ class MMD_GAN(object):
                     self.sess.run(self.lr_decay_op)
                     print('current learning rate: %f' % self.sess.run(self.lr))
                 if ('decay_gp' in self.config.suffix) and (self.config.gradient_penalty > 0):
-                    self.sess.run(self.gp.assign(self.gp * self.config.gp_decay_rate))
+                    self.sess.run(self.gp_decay_op)
                     print('current gradient penalty: %f' % self.sess.run(self.gp))
         
             if self.config.compute_scores:
-                self.compute_scores(step)
+#                print('[ ] Training step: copmuting scores...')
+                self.scorer.compute(self, step)
+#                self.compute_scores(step)
+            
+            if 'distance' in self.config.Loss_variance:
+                self.Loss_variance()
         
-        if (self.g_counter == 0) and (self.d_grads is not None):
-            d_steps = self.config.dsteps
-            if ((step % 500 == 0) or (step < 20)):
-                d_steps = self.config.start_dsteps
-            self.d_counter = (self.d_counter + 1) % (d_steps + 1)
-        if self.d_counter == 0:
-            self.g_counter = (self.g_counter + 1) % self.config.gsteps
         return g_loss, d_loss, step
       
 
     def train_init(self):
         self.set_grads()
 
+        self.sess.run(tf.local_variables_initializer())
         self.sess.run(tf.global_variables_initializer())
+        print('[*] Variables initialized.')
+#        if self.dataset == 'lsun':
+#            self.additional_sample_images = self.sess.run(self.images)
+        
         self.TrainSummary = tf.summary.merge_all()
         
         self._ensure_dirs('log')
@@ -465,7 +510,7 @@ class MMD_GAN(object):
                                   self.sess.run(self.lr)))
         else:
             print(" [!] Load failed...")
-        self.lr *= self.config.decay_rate
+#        self.sess.run(self.lr.assign(self.config.learning_rate))
         if (not self.config.MMD_lr_scheduler) and (self.sess.run(self.gp) == self.config.gradient_penalty):
             step = self.sess.run(self.global_step)
             lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
@@ -474,6 +519,8 @@ class MMD_GAN(object):
                 self.gp *= self.config.gp_decay_rate ** lr_decays_so_far
                 print('current gradient penalty: %f' % self.sess.run(self.gp))
         print('current learning rate: %f' % self.sess.run(self.lr))    
+        
+        print('[*] Model initialized for training')
 
     def set_input_pipeline(self, streams=None):
         if self.dataset in ['mnist', 'cifar10']:
@@ -572,54 +619,40 @@ class MMD_GAN(object):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
  
     def set_tf_records_pipeline(self, streams=None):     
-        from tensorflow import gfile
         if streams is None:
             streams = [self.real_batch_size]
         streams = np.cumsum(streams)
         bs = streams[-1]
-        read_batch = max(100, self.real_batch_size * 20)
-
-        with tf.device(
-                tf.train.replica_device_setter(0, worker_device='/cpu:0')):
+        
+        path = '/nfs/data/dougals/'
+        if not os.path.exists(path):
+            path = self.config.data_dir
+            
+        with tf.device(tf.train.replica_device_setter(0, worker_device='/cpu:0')):
             filename_queue = tf.train.string_input_producer(
-                gfile.Glob('/nfs/nhome/live/dougals/lsun-32'), num_epochs=None)
+                tf.gfile.Glob(os.path.join(path, 'lsun-32/bedroom_train_*')), num_epochs=None)
             reader = tf.TFRecordReader()
             _, serialized_example = reader.read(filename_queue)
-            features = tf.parse_single_example(
-                serialized_example,
-                features={
-                    "image_raw": tf.FixedLenFeature([], tf.string),
-                    "height": tf.FixedLenFeature([], tf.int64),
-                    "width": tf.FixedLenFeature([], tf.int64),
-                    "depth": tf.FixedLenFeature([], tf.int64)
-                })
-            image = tf.decode_raw(features["image_raw"], tf.uint8)
-            height = tf.reshape((features["height"], tf.int64)[0], [1])
-            height = tf.cast(height, tf.int32)
-            width = tf.reshape((features["width"], tf.int64)[0], [1])
-            width = tf.cast(width, tf.int32)
-            depth = tf.reshape((features["depth"], tf.int64)[0], [1])
-            depth = tf.cast(depth, tf.int32)
-            image = tf.reshape(image, tf.concat([height, width, depth], 0))
-            
-            print('HWD: ' + repr((height, width, depth)))
-
-
-            single_sample = image
+            features = tf.parse_single_example(serialized_example, features={
+                'image/class/label': tf.FixedLenFeature([1], tf.int64),
+                'image/encoded': tf.FixedLenFeature([], tf.string),
+            })
+            image = tf.image.decode_jpeg(features['image/encoded'])
+            single_sample = tf.cast(image, tf.float32)/255.
             single_sample.set_shape([self.output_size, self.output_size, self.c_dim])
+            
             print('pipeline 0')
             ims = tf.train.shuffle_batch([single_sample], bs,
-                                                capacity=max(bs * 8, read_batch * 4),
-                                                min_after_dequeue=max(bs * 2, read_batch//2),
-                                                num_threads=16,
-                                                enqueue_many=False)
-            print('pipeline 1')
-            self.images = ims[:streams[0]]
-            for j in np.arange(1, len(streams)):
-                self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
-                
-            self.additional_sample_images = self.sess.run(self.images)
-                   
+                                         capacity=bs * 8,
+                                         min_after_dequeue=bs * 2, 
+                                         num_threads=16,
+                                         enqueue_many=False)
+        print('pipeline 1')
+        self.images = ims[:streams[0]]
+        for j in np.arange(1, len(streams)):
+            self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
+        print('pipeline end')
+            
     def set_lmdb_pipeline(self, streams=None):
         if streams is None:
             streams = [self.real_batch_size]
@@ -628,7 +661,7 @@ class MMD_GAN(object):
 
         data_dir = os.path.join(self.data_dir, self.dataset)
         keys = []
-        read_batch = max(10000, self.real_batch_size * 20)
+        read_batch = max(4000, self.real_batch_size * 10)
         # getting keys in database
         env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
         with env.begin() as txn:
@@ -655,8 +688,11 @@ class MMD_GAN(object):
                         key, byte_arr = cursor.item()
                         byte_im = io.BytesIO(byte_arr)
                         byte_im.seek(0)
-                        im = Image.open(byte_im)
-                        ims.append(center_and_scale(im, size=self.output_size))
+                        try:
+                            im = Image.open(byte_im)
+                            ims.append(center_and_scale(im, size=self.output_size))
+                        except Exception as e:
+                            print(e)
                         if not cursor.next():
                             cursor.first()
                 env.close()
@@ -681,8 +717,8 @@ class MMD_GAN(object):
 #                                            num_threads=2,
 #                                            enqueue_many=True)
         ims = tf.train.shuffle_batch([single_sample], bs,
-                                            capacity=max(bs * 8, read_batch * 4),
-                                            min_after_dequeue=max(bs * 2, read_batch//2),
+                                            capacity=max(bs * 8, read_batch),
+                                            min_after_dequeue=max(bs * 2, read_batch//8),
                                             num_threads=16,
                                             enqueue_many=True)
         
@@ -690,11 +726,26 @@ class MMD_GAN(object):
         for j in np.arange(1, len(streams)):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
         
-    def discriminator(self, image, y=None, reuse=False, batch_size=None):
+            
+            
+    def set_pipeline(self):
+        if 'lsun' in self.dataset:
+            if 'lmdb' in self.config.suffix:
+                self.set_lmdb_pipeline()
+            else:
+                self.set_tf_records_pipeline()
+        elif self.dataset == 'celebA':
+            self.set_input3_pipeline()
+        else:
+            self.set_input_pipeline()
+
+            
+    def discriminator(self, image, y=None, reuse=False, batch_size=None, 
+                      return_layers=False):
         if batch_size is None:
             batch_size = self.batch_size
         with tf.variable_scope("discriminator") as scope:
-            outputs = []
+            layers = {}
             if reuse:
                 scope.reuse_variables()
             if 'dcgan' in self.config.architecture: # default architecture
@@ -731,7 +782,7 @@ class MMD_GAN(object):
                 h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
                 h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
                 hF = linear(tf.reshape(h4, [batch_size, -1]), self.dof_dim, 'd_h6_lin')
-                outputs += [(h4, 'h4')]
+                layers['h4'] = h4
             elif 'dc128' in self.config.architecture:
                 if self.dof_dim <= 0:
                     self.dof_dim = self.df_dim * 32
@@ -742,23 +793,19 @@ class MMD_GAN(object):
                 h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
                 h5 = lrelu(self.d_bn5(conv2d(h4, self.df_dim * 32, name='d_h5_conv')))
                 hF = linear(tf.reshape(h5, [batch_size, -1]), self.dof_dim , 'd_h6_lin')
-                outputs += [(h4, 'h4'), (h5, 'h5')]
+                layers.update({'h4': h4, 'h5': h5})
             else:
                 raise ValueError("Choose architecture from  [dfc, dcold, dcgan, dc64, dc128]")
             print(repr(image.get_shape()).replace('Dimension', '') + ' --> Discriminator --> ' + \
                   repr(hF.get_shape()).replace('Dimension', ''))
             
-            outputs = [(h0, 'h0'), (h1, 'h1'), (h2, 'h2'), 
-                       (h3, 'h3')] + outputs + [(hF, 'hF')]
-                       
-            if self.config.L2_discriminator_penalty > 0:
-                penalty = 0.0
-                for layer in outputs:
-                    penalty += tf.reduce_mean(tf.square(layer[0]))
-                self.d_L2_penalty = penalty * self.config.L2_discriminator_penalty
+            layers.update({'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF})
             
             if _debug:
-                variable_summaries(outputs)
+                variable_summaries(layers)
+            
+            if return_layers:
+                return layers
                 
             return hF
 
@@ -887,9 +934,13 @@ class MMD_GAN(object):
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(sess=self.sess, coord=coord)        
         step = 0
+        
+        print('[ ] Training ... ')
         while step <= self.config.max_iteration:
             g_loss, d_loss, step = self.train_step()
             self.save_samples(step)
+            if self.config.save_layer_outputs:
+                self.save_layers(step)
             if self.dataset == 'GaussianMix':
                 self.make_video(step, self.G_config, g_loss)
         if self.dataset == 'GaussianMix':
@@ -939,13 +990,20 @@ class MMD_GAN(object):
         print("[%d][%.1f] KID mean (std): %f (%f)" % (step, \
               time.time() - self.start_time, mmd2s.mean(), mmd2s.std()))           
         
+        if len(self.scoring['output']) > 0:
+            if np.min([sc['mmd2'].mean() for sc in self.scoring['output']]) > output['mmd2'].mean():
+                print('Saving BEST model (so far)')
+                self.save(self.checkpoint_dir, None)
         self.scoring['output'].append(output)
+                
         
         path = os.path.join(self.sample_dir, 'score%d.npz' % step)
         np.savez(path, **output)
         
         if self.config.MMD_lr_scheduler:
             n = 10
+            if self.dataset == 'mnist':
+                n = 10
             nc = 3
             bs = 2048
             new_Y = codes[:bs]
@@ -1012,12 +1070,14 @@ class MMD_GAN(object):
 
 
     def save(self, checkpoint_dir, step):
-        model_name = "MMDGAN.model"
         self._ensure_dirs('checkpoint')
-
-        self.saver.save(self.sess,
-                        os.path.join(self.checkpoint_dir, model_name),
-                        global_step=step)
+        if step is None:
+            self.saver.save(self.sess,
+                            os.path.join(self.checkpoint_dir, "best.model"))
+        else:
+            self.saver.save(self.sess,
+                            os.path.join(self.checkpoint_dir, "MMDGAN.model"),
+                            global_step=step)
 
 
     def load(self, checkpoint_dir):
@@ -1045,12 +1105,37 @@ class MMD_GAN(object):
         if (np.mod(step, freq) == 0) and (self.d_counter == 0):
             self.save(self.checkpoint_dir, step)
             samples = self.sess.run(self.sampler)
-            print(samples.shape)
             self._ensure_dirs('sample')
             p = os.path.join(self.sample_dir, 'train_{:02d}.png'.format(step))
             save_images(samples[:64, :, :, :], [8, 8], p)  
             
-    def get_samples(self, n=None, save=True):
+            
+    def save_layers(self, step, freq=1000, n=256, layers=[-1, -2]):
+        if (np.mod(step, freq) == 0) and (self.d_counter == 0):
+            if not (layers == 'all'):
+                keys = [sorted(list(self.d_G_layers))[i] for i in layers]
+            fake = [(key + '_fake', self.d_G_layers[key]) for key in keys] 
+            real = [(key + '_real', self.d_images_layers[key]) for key in keys]
+            
+            values = self._evaluate(dict(real + fake), n=n)    
+            path = os.path.join(self.sample_dir, 'layer_outputs_%d.npz' % step)
+            np.savez(path, **values)
+            
+    def _evaluate(self, variable_dict, n=None):
+        if n is None:
+            n = self.batch_size
+        values = dict([(key, []) for key in variable_dict.keys()])
+        sampled = 0
+        while sampled < n:
+            vv = self.sess.run(variable_dict)
+            for key, val in vv.items():
+                values[key].append(val)
+            sampled += list(vv.items())[0][1].shape[0]
+        for key, val in values.items():
+            values[key] = np.concatenate(val, axis=0)[:n]        
+        return values
+        
+    def get_samples(self, n=None, save=True, layers=[]):
         if not (self.initialized_for_sampling or self.config.is_train):
             print('[*] Loading from ' + self.checkpoint_dir + '...')
             self.sess.run(tf.local_variables_initializer())
@@ -1061,19 +1146,49 @@ class MMD_GAN(object):
             else:
                 print(" [!] Load failed...")
                 return
-        if n is None:
-            n = self.sample_size
-        sampled = []
-        while len(sampled) * self.sample_size < n:
-            sampled.append(self.sess.run(self.G))
-        samples = np.concatenate(sampled, axis=0)[:n]
+        
+        if len(layers) > 0:
+            outputs = dict([(key + '_features', val) for key, val in self.d_G_layers])
+            if not (layers == 'all'):
+                keys = [sorted(list(outputs.keys()))[i] for i in layers]
+                outputs = dict([(key, outputs[key]) for key in keys])
+        else:
+            outputs = {}
+        outputs['samples'] = self.G
+
+        values = self._evaluate(outputs, n=n)
+        
         if not save:
-            return samples
-        file = os.path.join(self.sample_dir, 'samples.npy')
-        np.save(file, samples, allow_pickle=False)
-        print(" [*] %d samples saved in '%s'" % (n, file))
+            if len(layers) > 0:
+                return values
+            return values['samples']
+        
+        for key, val in values.items():
+            file = os.path.join(self.sample_dir, '%s.npy' % key)
+            np.save(file, val, allow_pickle=False)
+            print(" [*] %d %s saved in '%s'" % (n, key, file))          
     
     
+    def print_pca(self, n=10000, return_=False, layers=[-1, -2]):
+        from sklearn.decomposition import PCA
+        features = self.get_samples(n=n, save=False, layers=layers)
+        del features['samples']
+        pcas = {}
+        if not return_:
+            print('%s %s critic size: %d filters, %d top layer, batch size: %d' % \
+                  (self.config.model, self.config.kernel, self.df_dim, self.dof_dim, self.batch_size))
+        for key, val in features.items():
+            feats = val.size//val.shape[0]
+            pca = PCA()
+            pca.fit(val.reshape((val.shape[0], feats)))
+            if return_:
+                pcas[key] = pca.explained_variance_ratio_
+            main_pcs = pca.explained_variance_ratio_[:5]
+            summary = ' '.join(['%.3f' % ev for ev in main_pcs])
+            print('%13s: %30s (%.1f%% variance in %d/%d PCs)' % (key, summary, \
+                  100.* main_pcs.sum(), len(main_pcs), feats))
+                    
+                    
     def make_video(self, step, G_config, optim_loss, freq=10):
         if np.mod(step, freq) == 1:          
             samples = self.sess.run(self.sampler)
@@ -1085,3 +1200,137 @@ class MMD_GAN(object):
             G_config['writer'].grab_frame()
             if step % 100 == 0:
                 display(G_config['fig'])
+
+                
+class Scorer(object):
+    def __init__(self, dataset, lr_scheduler=True):
+        self.dataset = dataset
+        if dataset == 'mnist':
+            self.model = LeNet()
+            self.size = 100000
+            self.frequency = 500
+        else:
+            self.model = Inception()
+            self.size = 25000
+            self.frequency = 2000
+        
+        self.output = []
+
+        if lr_scheduler:
+            self.three_sample = []
+            self.three_sample_chances = 0
+        self.lr_scheduler = lr_scheduler
+            
+    def set_train_codes(self, gan):
+        suffix = '' if (gan.output_size <= 32) else ('-%d' % gan.output_size)
+        path = os.path.join(gan.data_dir, '%s-codes%s.npy' % (self.dataset, suffix))
+      
+        if os.path.exists(path):
+            self.train_codes = np.load(path)
+            print('[*] Train codes loaded. ')
+            return
+            
+        ims = []
+        while len(ims) < self.size // gan.batch_size:
+            ims.append(gan.sess.run(gan.images))
+        ims = np.concatenate(ims, axis=0)[:self.size]
+        _, self.train_codes = featurize(ims, self.model, get_preds=True, get_codes=True)
+        np.save(path, self.train_codes)
+        print('[*] %d train images featurized and saved in <%s>' % (self.size, path))
+                    
+    def compute(self, gan, step):
+        if step % self.frequency != 0:
+            return
+            
+        if not hasattr(self, 'train_codes'):
+            print('[ ] Getting train codes...')
+            self.set_train_codes(gan)
+            
+        tt = time.time()
+        print("[%d][%f] Scoring start" % (step, time.time() - gan.start_time))
+        output = {}
+        images4score = gan.get_samples(n=self.size, save=False)
+        if self.dataset == 'mnist': #LeNet model takes [-.5, .5] pics
+            images4score -= .5
+            if (images4score.max() > .5) or (images4score.min() < -.5):
+                print('WARNING! LeNet min/max violated: min, max = ', images4score.min(), images4score.max())
+                images4score = images4score.clip(-.5, .5)
+        else: #Inception model takes [0 , 255] pics
+            images4score *= 255.0
+            if (images4score.max() > 255.) or (images4score.min() < .0):
+                print('WARNING! Inception min/max violated: min, max = ', images4score.min(), images4score.max())
+                images4score = images4score.clip(0., 255.)
+                
+        preds, codes = featurize(images4score, self.model,
+                                 get_preds=True, get_codes=True)
+        print("[%d][%.1f] featurizing finished" % (step, \
+              time.time() - gan.start_time))
+        
+        output['inception'] = scores = inception_score(preds)
+        print("[%d][%.1f] Inception mean (std): %f (%f)" % (step, \
+              time.time() - gan.start_time, np.mean(scores), np.std(scores)))
+        
+        output['fid'] = scores = fid_score(codes, self.train_codes, 
+                                           split_method='bootstrap',
+                                           splits=3)
+        print("[%d][%.1f] FID mean (std): %f (%f)" % (step, \
+              time.time() - gan.start_time, np.mean(scores), np.std(scores)))
+        
+        ret = polynomial_mmd_averages(codes, self.train_codes, 
+                                n_subsets=10, subset_size=1000, 
+                                ret_var=False)
+        output['mmd2'] = mmd2s = ret
+        print("[%d][%.1f] KID mean (std): %f (%f)" % (step, \
+              time.time() - gan.start_time, mmd2s.mean(), mmd2s.std()))           
+        
+        if len(self.output) > 0:
+            if np.min([sc['mmd2'].mean() for sc in self.output]) > output['mmd2'].mean():
+                print('Saving BEST model (so far)')
+                self.save(self.checkpoint_dir, None)
+        self.output.append(output)
+                
+        
+        filepath = os.path.join(gan.sample_dir, 'score%d.npz' % step)
+        np.savez(filepath, **output)
+
+        
+        if self.lr_scheduler:
+            n = 10
+            if self.dataset == 'mnist':
+                n = 10
+            nc = 3
+            bs = 2048
+            new_Y = codes[:bs]
+            X = self.train_codes[:bs]
+            print('3-sample stats so far: %d' % len(self.three_sample))
+            if len(self.three_sample) >= n:
+                saved_Z = self.three_sample[0]
+                mmd2_diff, test_stat, Y_related_sums = \
+                    MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, saved_Z)
+                p_val = scipy.stats.norm.cdf(test_stat)
+                print("[%d][%f] 3-sample test stat = %.1f" % (step, time.time() - gan.start_time, test_stat))
+                print("[%d][%f] 3-sample p-value = %.1f" % (step, time.time() - gan.start_time, p_val))
+                if p_val > .1:
+                    self.three_sample_chances += 1
+                    if self.three_sample_chances >= nc:
+                        # no confidence that new Y sample is closer to X than old Z is
+                        gan.sess.run(gan.lr_decay_op)
+                        print('No improvement in last %d tests. Decreasing learning rate to %f' % \
+                              (nc, gan.sess.run(gan.lr)))
+                        self.three_sample = (self.three_sample + [Y_related_sums])[-nc:] # reset memorized sums
+                        self.three_sample_chances = 0
+                    else:
+                        print('No improvement in last %d test(s). Keeping learning rate at %f' % \
+                              (self.three_sample_chances, gan.sess.run(gan.lr)))
+                else:
+                    # we're confident that new_Y is better than old_Z is
+                    print('Keeping learning rate at %f' % gan.sess.run(gan.lr))
+                    self.three_sample = self.three_sample[1:] + [Y_related_sums]
+                    self.three_sample_chances = 0
+            else: # add new sums to memory
+                self.three_sample.append(
+                    MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, None)
+                )
+                print("[%d][%f] computing stats for 3-sample test finished" % (step, time.time() - gan.start_time))    
+                
+        print("[%d][%f] Scoring end, total time = %.1f s" % (step, time.time() - gan.start_time, time.time() - tt))
