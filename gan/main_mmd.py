@@ -115,7 +115,7 @@ def main(_):
         elif FLAGS.print_pca:
             dcgan.print_pca()
         else:
-            dcgan.get_samples(FLAGS.no_of_samples, layer_features=[-1])
+            dcgan.get_samples(FLAGS.no_of_samples, layers=[-1])
         
 
         if FLAGS.visualize:

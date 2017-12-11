@@ -42,7 +42,7 @@ class MMD_GAN(object):
             dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
-        self.start_time = time.time()
+        self.timer = Timer()
         self.check_numerics = _check_numerics
         self.dataset = config.dataset
         if config.architecture == 'dc128':
@@ -445,11 +445,10 @@ class MMD_GAN(object):
                     _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.g_grads] + eval_ops)
             else:
                 _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
-            et = "g step" if (self.d_counter == 0) else "d step"
-            et += ", epoch: [%2d] time: %4.4f" % (step, time.time() - self.start_time)
+            et = self.timer(step, "g step" if (self.d_counter == 0) else "d step", False)
 #        print('[*] Training step: gradients computed.')
-        assert ~np.isnan(g_loss), "NaN g_loss, epoch: " + et
-        assert ~np.isnan(d_loss), "NaN d_loss, epoch: " + et  
+        assert ~np.isnan(g_loss), et + "NaN g_loss, epoch: "
+        assert ~np.isnan(d_loss), et + "NaN d_loss, epoch: "
         # if G STEP, after D steps
         if self.d_counter == 0:
             if step % 10000 == 0:
@@ -460,9 +459,7 @@ class MMD_GAN(object):
                     print('Step %d summary exception. ' % step, e)
                     self.err_counter += 1
             if write_summary:
-                print("Epoch: [%2d] time: %4.4f, %s, G: %.8f, D: %.8f"
-                    % (step, time.time() - self.start_time, 
-                       self.optim_name, g_loss, d_loss))
+                self.timer(step, "%s, G: %.8f, D: %.8f" % (self.optim_name, g_loss, d_loss))
                 if self.config.L2_discriminator_penalty > 0:
                     print('D_L2 penalty: %.8f' % self.sess.run(self.d_L2_penalty))
                 if _debug:
@@ -528,7 +525,7 @@ class MMD_GAN(object):
             data_X, data_y = getattr(load, self.dataset)(path)
         elif self.dataset in ['celebA']:
             files = glob(os.path.join(self.data_dir, self.dataset, '*.jpg'))
-            data_X = np.array([get_image(f, 144, 144, resize_height=self.output_size, 
+            data_X = np.array([get_image(f, 160, 160, resize_height=self.output_size, 
                                          resize_width=self.output_size) for f in files[:]])
         elif self.dataset == 'GaussianMix':
             G_config = {'g_line': None}
@@ -580,13 +577,13 @@ class MMD_GAN(object):
                 if rc//len(self.files) < self.read_count//len(self.files):
                     self.files = list(np.random.permutation(self.files))
                 tt = time.time()
-                print('[%d][%f] read start' % (rc, tt - self.start_time))
+                self.timer(rc, 'read start')
                 ims = []
                 files_k = self.files[k: k + read_batch] + self.files[: max(0, k + read_batch - len(self.files))]
                 for ii, ff in enumerate(files_k):
-                    ims.append(get_image(ff, 144, 144, resize_height=self.output_size, 
+                    ims.append(get_image(ff, 160, 160, resize_height=self.output_size, 
                                                   resize_width=self.output_size))
-                print('[%d][%f] read time = %f' % (rc, time.time() - self.start_time, time.time() - tt))
+                self.timer(rc, 'read time = %f' % (time.time() - tt))
                 return np.asarray(ims, dtype=np.float32)                
                 
 
@@ -678,7 +675,7 @@ class MMD_GAN(object):
                 rc = self.read_count
                 self.read_count += 1
                 tt = time.time()
-                print('[%d][%f] read start' % (rc, tt - self.start_time))
+                self.timer(rc, 'read start')
                 env = lmdb.open(data_dir, map_size=1099511627776, max_readers=100, readonly=True)
                 ims = []
                 with env.begin(write=False) as txn:
@@ -696,7 +693,7 @@ class MMD_GAN(object):
                         if not cursor.next():
                             cursor.first()
                 env.close()
-                print('[%d][%f] read time = %f' % (rc, time.time() - self.start_time, time.time() - tt))
+                self.timer(rc, 'read time = %f' % (time.time() - tt))
                 return np.asarray(ims, dtype=np.float32)
 
         choice = np.random.choice(keys, 1)[0]
@@ -949,97 +946,6 @@ class MMD_GAN(object):
         coord.request_stop()
         coord.join(threads)
         
-        
-    def compute_scores(self, step):
-        if step % self.scoring['frequency'] != 0:
-            return
-        tt = time.time()
-        print("[%d][%f] Scoring start" % (step, time.time() - self.start_time))
-        output = {}
-        images4score = self.get_samples(n=self.scoring['size'], save=False)
-        if self.dataset == 'mnist': #LeNet model takes [-.5, .5] pics
-            images4score -= .5
-            if (images4score.max() > .5) or (images4score.min() < -.5):
-                print('WARNING! LeNet min/max violated: min, max = ', images4score.min(), images4score.max())
-                images4score = images4score.clip(-.5, .5)
-        else: #Inception model takes [0 , 255] pics
-            images4score *= 255.0
-            if (images4score.max() > 255.) or (images4score.min() < .0):
-                print('WARNING! Inception min/max violated: min, max = ', images4score.min(), images4score.max())
-                images4score = images4score.clip(0., 255.)
-                
-        preds, codes = featurize(images4score, self.scoring['model'],
-                                 get_preds=True, get_codes=True)
-        print("[%d][%.1f] featurizing finished" % (step, \
-              time.time() - self.start_time))
-        
-        output['inception'] = scores = inception_score(preds)
-        print("[%d][%.1f] Inception mean (std): %f (%f)" % (step, \
-              time.time() - self.start_time, np.mean(scores), np.std(scores)))
-        
-        output['fid'] = scores = fid_score(codes, self.scoring['train_codes'], 
-                                           split_method='bootstrap',
-                                           splits=3)
-        print("[%d][%.1f] FID mean (std): %f (%f)" % (step, \
-              time.time() - self.start_time, np.mean(scores), np.std(scores)))
-        
-        ret = polynomial_mmd_averages(codes, self.scoring['train_codes'], 
-                                n_subsets=10, subset_size=1000, 
-                                ret_var=False)
-        output['mmd2'] = mmd2s = ret
-        print("[%d][%.1f] KID mean (std): %f (%f)" % (step, \
-              time.time() - self.start_time, mmd2s.mean(), mmd2s.std()))           
-        
-        if len(self.scoring['output']) > 0:
-            if np.min([sc['mmd2'].mean() for sc in self.scoring['output']]) > output['mmd2'].mean():
-                print('Saving BEST model (so far)')
-                self.save(self.checkpoint_dir, None)
-        self.scoring['output'].append(output)
-                
-        
-        path = os.path.join(self.sample_dir, 'score%d.npz' % step)
-        np.savez(path, **output)
-        
-        if self.config.MMD_lr_scheduler:
-            n = 10
-            if self.dataset == 'mnist':
-                n = 10
-            nc = 3
-            bs = 2048
-            new_Y = codes[:bs]
-            X = self.scoring['train_codes'][:bs]
-            print('3-sample stats so far: %d' % len(self.scoring['3sample']))
-            if len(self.scoring['3sample']) >= n:
-                saved_Z = self.scoring['3sample'][0]
-                mmd2_diff, test_stat, Y_related_sums = \
-                    MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, saved_Z)
-                p_val = scipy.stats.norm.cdf(test_stat)
-                print("[%d][%f] 3-sample test stat = %.1f" % (step, time.time() - self.start_time, test_stat))
-                print("[%d][%f] 3-sample p-value = %.1f" % (step, time.time() - self.start_time, p_val))
-                if p_val > .1:
-                    self.scoring['3sample_chances'] += 1
-                    if self.scoring['3sample_chances'] >= nc:
-                        # no confidence that new Y sample is closer to X than old Z is
-                        self.sess.run(self.lr_decay_op)
-                        print('No improvement in last %d tests. Decreasing learning rate to %f' % \
-                              (nc, self.sess.run(self.lr)))
-                        self.scoring['3sample'] = (self.scoring['3sample'] + [Y_related_sums])[-nc:] # reset memorized sums
-                        self.scoring['3sample_chances'] = 0
-                    else:
-                        print('No improvement in last %d test(s). Keeping learning rate at %f' % \
-                              (self.scoring['3sample_chances'], self.sess.run(self.lr)))
-                else:
-                    # we're confident that new_Y is better than old_Z is
-                    print('Keeping learning rate at %f' % self.sess.run(self.lr))
-                    self.scoring['3sample'] = self.scoring['3sample'][1:] + [Y_related_sums]
-                    self.scoring['3sample_chances'] = 0
-            else: # add new sums to memory
-                self.scoring['3sample'].append(
-                    MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, None)
-                )
-                print("[%d][%f] computing stats for 3-sample test finished" % (step, time.time() - self.start_time))    
-                
-        print("[%d][%f] Scoring end, total time = %.1f s" % (step, time.time() - self.start_time, time.time() - tt))
 
     def sampling(self, config):
         self.sess.run(tf.local_variables_initializer())
@@ -1146,9 +1052,9 @@ class MMD_GAN(object):
             else:
                 print(" [!] Load failed...")
                 return
-        
+    
         if len(layers) > 0:
-            outputs = dict([(key + '_features', val) for key, val in self.d_G_layers])
+            outputs = dict([(key + '_features', val) for key, val in self.d_G_layers.items()])
             if not (layers == 'all'):
                 keys = [sorted(list(outputs.keys()))[i] for i in layers]
                 outputs = dict([(key, outputs[key]) for key in keys])
@@ -1247,7 +1153,7 @@ class Scorer(object):
             self.set_train_codes(gan)
             
         tt = time.time()
-        print("[%d][%f] Scoring start" % (step, time.time() - gan.start_time))
+        gan.timer(step, "Scoring start")
         output = {}
         images4score = gan.get_samples(n=self.size, save=False)
         if self.dataset == 'mnist': #LeNet model takes [-.5, .5] pics
@@ -1263,30 +1169,26 @@ class Scorer(object):
                 
         preds, codes = featurize(images4score, self.model,
                                  get_preds=True, get_codes=True)
-        print("[%d][%.1f] featurizing finished" % (step, \
-              time.time() - gan.start_time))
+        gan.timer(step, "featurizing finished")
         
         output['inception'] = scores = inception_score(preds)
-        print("[%d][%.1f] Inception mean (std): %f (%f)" % (step, \
-              time.time() - gan.start_time, np.mean(scores), np.std(scores)))
+        gan.timer(step, "Inception mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
         
         output['fid'] = scores = fid_score(codes, self.train_codes, 
                                            split_method='bootstrap',
                                            splits=3)
-        print("[%d][%.1f] FID mean (std): %f (%f)" % (step, \
-              time.time() - gan.start_time, np.mean(scores), np.std(scores)))
+        gan.timer(step, "FID mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
         
         ret = polynomial_mmd_averages(codes, self.train_codes, 
                                 n_subsets=10, subset_size=1000, 
                                 ret_var=False)
         output['mmd2'] = mmd2s = ret
-        print("[%d][%.1f] KID mean (std): %f (%f)" % (step, \
-              time.time() - gan.start_time, mmd2s.mean(), mmd2s.std()))           
+        gan.timer(step, "KID mean (std): %f (%f)" % (mmd2s.mean(), mmd2s.std()))           
         
         if len(self.output) > 0:
             if np.min([sc['mmd2'].mean() for sc in self.output]) > output['mmd2'].mean():
                 print('Saving BEST model (so far)')
-                self.save(self.checkpoint_dir, None)
+                gan.save(gan.checkpoint_dir, None)
         self.output.append(output)
                 
         
@@ -1308,8 +1210,8 @@ class Scorer(object):
                 mmd2_diff, test_stat, Y_related_sums = \
                     MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, saved_Z)
                 p_val = scipy.stats.norm.cdf(test_stat)
-                print("[%d][%f] 3-sample test stat = %.1f" % (step, time.time() - gan.start_time, test_stat))
-                print("[%d][%f] 3-sample p-value = %.1f" % (step, time.time() - gan.start_time, p_val))
+                gan.timer(step, "3-sample test stat = %.1f" % test_stat)
+                gan.timer(step, "3-sample p-value = %.1f" % p_val)
                 if p_val > .1:
                     self.three_sample_chances += 1
                     if self.three_sample_chances >= nc:
@@ -1331,6 +1233,34 @@ class Scorer(object):
                 self.three_sample.append(
                     MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, None)
                 )
-                print("[%d][%f] computing stats for 3-sample test finished" % (step, time.time() - gan.start_time))    
+                gan.timer(step, "computing stats for 3-sample test finished")    
+                print('current learning rate: %f' % gan.sess.run(gan.lr))
                 
-        print("[%d][%f] Scoring end, total time = %.1f s" % (step, time.time() - gan.start_time, time.time() - tt))
+        gan.timer(step, "Scoring end, total time = %.1f s" % (time.time() - tt))
+        
+
+def hms(start_time):
+    t = int(time.time() - start_time)
+    m, s = t//60, t % 60
+    h, m = m//60, m % 60
+    if h > 0:
+        return '%2dh%02dm%02ds' % (h, m, s)
+    elif m > 0:
+        return '%5dm%02ds' % (m, s)
+    else:
+        return '%8ds' % s
+    
+class Timer(object):
+    def __init__(self, start_time=time.time(), limit=100):
+        self.start_time = start_time
+        self.limit = limit
+        
+    def __call__(self, step, mess='', prints=True):
+        if prints and (step % self.limit != 0) and (step > 10):
+            return
+        message = '[%8d][%s] %s' % (step, hms(self.start_time), mess)
+        if prints:
+            print(message)
+        else:
+            return message
+            

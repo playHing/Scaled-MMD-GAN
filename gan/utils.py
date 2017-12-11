@@ -320,7 +320,7 @@ def transform(image, input_height, input_width,
                                     resize_height, resize_width)
     else:
         cropped_image = scipy.misc.imresize(image, [resize_height, resize_width])
-    return np.array(cropped_image)/127.5 - 1.
+    return np.array(cropped_image)/255.
 
 class Loss_variance(object):
     def __init__(self, sess, dim, critic, kernel_name='distance', 
@@ -357,5 +357,25 @@ class Loss_variance(object):
         print('%s loss variance evaluation time: %.1f' % mess, time.time() - t0)
         
         
+def tf_read_jpeg(files, base_size=160, target_size=64, batch_size=128, 
+                 capacity=4000, num_threads=4):
+    filename_queue = tf.train.string_input_producer(files)
+    reader = tf.WholeFileReader()
+    _, raw = reader.read(filename_queue)
+    decoded = tf.image.decode_jpeg(raw, channels=3)
+    cropped = tf.image.resize_image_with_crop_or_pad(decoded, base_size, base_size)
+    
+    ims = tf.train.shuffle_batch(
+        [cropped], 
+        batch_size=batch_size,
+        capacity=capacity,
+        min_after_dequeue=capacity//4,
+        num_threads=4,
+        enqueue_many=False
+    )
+    
+    resized = tf.image.resize_bilinear(ims, (target_size, target_size))
+    images = tf.cast(resized, tf.float32)/255.
+    return images
     
     

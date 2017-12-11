@@ -36,15 +36,22 @@ class Cramer_GAN(MMD_GAN):
             self.G2 = tf.check_numerics(self.G2, 'self.G2')
             
         if self.config.dc_discriminator:
-            images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
+            self.d_images_layers = self.discriminator(self.images, reuse=False, 
+                        batch_size=self.real_batch_size, return_layers=True)
+            self.d_G_layers = self.discriminator(self.G, reuse=True,
+                                                 return_layers=True)
+            self.d_images = self.d_images_layers['hF']
+            self.d_G = self.d_G_layers['hF']
+            
+#            images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
             G2 = self.discriminator(self.G2, reuse=True)
-            self.d_G = self.discriminator(self.G, reuse=True)
+#            self.d_G = self.discriminator(self.G, reuse=True)
         else:
-            images = tf.reshape(self.images, [self.real_batch_size, -1])
+            self.d_images = tf.reshape(self.images, [self.real_batch_size, -1])
             self.d_G = tf.reshape(self.G, [self.batch_size, -1])
             G2 = tf.reshape(self.G2, [self.batch_size, -1])
 
-        self.set_loss(self.d_G, G2, images)
+        self.set_loss(self.d_G, G2, self.d_images)
 
         block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
         tf.summary.image("train/input image",
