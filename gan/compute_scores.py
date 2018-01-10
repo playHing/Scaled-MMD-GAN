@@ -110,9 +110,9 @@ def featurize(images, model, batch_size=100, transformer=np.asarray,
     assert(sub.ndim == 4)
     if isinstance(model, Inception):
         assert sub.shape[3] == 3
-        if (sub.max() > 255) or (sub.min() < 0):
-            print('WARNING! sub min, max = ', sub.min(), sub.max())
-            sub = sub.clip(0., 255.)
+#        if (sub.max() > 255) or (sub.min() < 0):
+        print('WARNING! sub min, max = ', sub.min(), sub.max())
+        sub = sub.clip(0., 255.)
     elif isinstance(model, LeNet):
         batch_size = 64
         assert sub.shape[3] == 1
@@ -456,6 +456,8 @@ def main():
 
     need_preds = args.do_inception or args.save_preds
     need_codes = args.do_fid or args.do_mmd or args.save_codes
+
+    print('Transformer test: transformer([-1, 0, 10.]) = ' + repr(transformer(np.array([-1, 0, 10.]))))
 
     if args.load_codes or args.load_preds:
         if args.load_codes:

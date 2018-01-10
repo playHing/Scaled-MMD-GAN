@@ -358,13 +358,16 @@ class Loss_variance(object):
         
         
 def tf_read_jpeg(files, base_size=160, target_size=64, batch_size=128, 
-                 capacity=4000, num_threads=4):
+                 capacity=4000, num_threads=4, random_crop=9):
     filename_queue = tf.train.string_input_producer(files)
     reader = tf.WholeFileReader()
     _, raw = reader.read(filename_queue)
-    decoded = tf.image.decode_jpeg(raw, channels=3)
-    cropped = tf.image.resize_image_with_crop_or_pad(decoded, base_size, base_size)
-    
+    decoded = tf.image.decode_jpeg(raw, channels=3) # HWC
+    bs = base_size + 2 * random_crop
+    cropped = tf.image.resize_image_with_crop_or_pad(decoded, bs, bs)
+    if random_crop > 0:
+        cropped = tf.image.random_flip_left_right(cropped)
+        cropped = tf.random_crop(cropped, [base_size, base_size, 3])
     ims = tf.train.shuffle_batch(
         [cropped], 
         batch_size=batch_size,
@@ -378,4 +381,32 @@ def tf_read_jpeg(files, base_size=160, target_size=64, batch_size=128,
     images = tf.cast(resized, tf.float32)/255.
     return images
     
+def PIL_read_jpeg(files, base_size=160, target_size=64, batch_size=128,
+                  capacity=4000, num_threads=4):
+    from PIL import Image
     
+    def read_single(f):
+        img = Image.open(f)
+        w, h = img.size
+        assert w >= base_size, 'wrong width'
+        assert h >= base_size, 'wrong height'
+        l, r = (w - base_size)//2, (h - base_size)//2
+        img.crop((l, r, l + base_size, r + base_size))
+        img.resize((target_size, target_size), Image.ANTIALIAS)
+        return np.asarray(img, tf.float32)/255.
+     
+    filename_queue = tf.train.string_input_producer(files, shuffle=True)   
+    single_file = filename_queue.dequeue()
+    single_sample = tf.py_func(read_single, [single_file], tf.float32)
+    single_sample.set_shape([target_size, target_size, 3])
+    
+    images = tf.train.shuffle_batch(
+        [single_sample], 
+        batch_size=batch_size,
+        capacity=capacity,
+        min_after_dequeue=capacity//4,
+        num_threads=4,
+        enqueue_many=False
+    )
+    
+    return images

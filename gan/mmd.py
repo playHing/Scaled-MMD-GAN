@@ -119,7 +119,7 @@ def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None,
 def _mix_rq_dot_kernel(X, Y, alphas=[.1, 1., 10.], wts=None, 
                        K_XY_only=False, check_numerics=_check_numerics):
     return _mix_rq_kernel(X, Y, alphas=alphas, wts=wts, K_XY_only=K_XY_only, 
-                          check_numerics=check_numerics, add_dot=1.)
+                          check_numerics=check_numerics, add_dot=.1)
 
 def _tanh_mix_rq_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
     return _mix_rq_kernel(tf.tanh(X), tf.tanh(Y), K_XY_only=K_XY_only, 

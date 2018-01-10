@@ -29,7 +29,8 @@ class Cramer_GAN(MMD_GAN):
         self.G2 = self.generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1.,
                                                     maxval=1., dtype=tf.float32, name='z2'),
                                 reuse=True, batch_size=self.batch_size)
-        self.sampler = self.generator(self.sample_z, is_train=False, reuse=True)
+        self.sampler = self.generator(self.sample_z, is_train=False, reuse=True,
+                                      batch_size=self.sample_size)
         
         if self.check_numerics:
             self.G = tf.check_numerics(self.G, 'self.G')

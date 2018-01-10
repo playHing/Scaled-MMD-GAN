@@ -615,6 +615,20 @@ class MMD_GAN(object):
         for j in np.arange(1, len(streams)):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
  
+    def set_jpeg_pipeline(self, streams=None):
+        if streams is None:
+            streams = [self.real_batch_size]
+        streams = np.cumsum(streams)
+        files = glob(os.path.join(self.data_dir, self.dataset, '*.jpg'))
+        ims = tf_read_jpeg(files, 
+                           base_size=160, target_size=self.output_size, 
+                           batch_size=streams[-1], 
+                           capacity=4000, num_threads=4)
+        self.images = ims[:streams[0]]
+        for j in np.arange(1, len(streams)):
+            self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
+
+            
     def set_tf_records_pipeline(self, streams=None):     
         if streams is None:
             streams = [self.real_batch_size]
@@ -732,7 +746,7 @@ class MMD_GAN(object):
             else:
                 self.set_tf_records_pipeline()
         elif self.dataset == 'celebA':
-            self.set_input3_pipeline()
+            self.set_jpeg_pipeline()
         else:
             self.set_input_pipeline()
 
@@ -745,7 +759,7 @@ class MMD_GAN(object):
             layers = {}
             if reuse:
                 scope.reuse_variables()
-            if 'dcgan' in self.config.architecture: # default architecture
+            if ('dcgan' in self.config.architecture): # default architecture
                 if self.dof_dim <= 0:
                     self.dof_dim = self.df_dim * 8
                 # For Cramer:
@@ -770,7 +784,7 @@ class MMD_GAN(object):
                 h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim, name='d_h3_conv')))
                 hF = linear(tf.reshape(h3, [batch_size, -1]), self.df_dim, 'd_h4_lin')
                 self.dof_dim = self.df_dim
-            elif 'dc64' in self.config.architecture:
+            elif ('dc64' in self.config.architecture)  or ('g-resnet5' in self.config.architecture):
                 if self.dof_dim <= 0:
                     self.dof_dim = self.df_dim * 16
                 h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
@@ -923,7 +937,24 @@ class MMD_GAN(object):
 
                 h6 = deconv2d(h5, [batch_size, s1, s1, self.c_dim], name='g_h6')
                 return tf.nn.sigmoid(h6)
-
+            elif 'resnet5' in self.config.architecture:
+                from resnet import ResidualBlock
+                import tflib as lib
+                s1, s2, s4, s8, s16, s32 = conv_sizes(self.output_size, layers=5, stride=2)
+                # project `z` and reshape
+                z_= linear(z, self.gf_dim*16*s32*s32, 'g_h0_lin')
+                dim = self.gf_dim
+                h0 = tf.reshape(z_, [-1, dim * 16, s32, s32]) # NCHW format
+                h1 = ResidualBlock('g_res1',16*dim, 8*dim, 3, h0, resample='up')
+                h2 = ResidualBlock('g_res2', 8*dim, 4*dim, 3, h1, resample='up')
+                h3 = ResidualBlock('g_res3', 4*dim, 2*dim, 3, h2, resample='up')
+                h4 = ResidualBlock('g_res4', 2*dim, 1*dim, 3, h3, resample='up')
+                h4 = lib.ops.batchnorm.Batchnorm('g_h4', [0, 2, 3], h4, fused=True)
+                h4 = tf.nn.relu(h4)
+#                h5 = lib.ops.conv2d.Conv2D('g_h5', dim, 3, 3, h4)
+                h5 = tf.transpose(h4, [0, 2, 3, 1]) # NCHW to NHWC
+                h5 = deconv2d(h5, [batch_size, s1, s1, self.c_dim], name='g_h5')
+                return tf.nn.sigmoid(h5)
             
     def train(self):    
         self.train_init()
@@ -1135,12 +1166,12 @@ class Scorer(object):
             self.train_codes = np.load(path)
             print('[*] Train codes loaded. ')
             return
-            
+        print('[!] Codes not found. Featurizing...')    
         ims = []
         while len(ims) < self.size // gan.batch_size:
             ims.append(gan.sess.run(gan.images))
         ims = np.concatenate(ims, axis=0)[:self.size]
-        _, self.train_codes = featurize(ims, self.model, get_preds=True, get_codes=True)
+        _, self.train_codes = featurize(ims * 255., self.model, get_preds=True, get_codes=True)
         np.save(path, self.train_codes)
         print('[*] %d train images featurized and saved in <%s>' % (self.size, path))
                     
