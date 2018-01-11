@@ -97,7 +97,7 @@ class ResNetGenerator(Generator):
 class Discriminator:
     def __init__(self, dim, o_dim, use_batch_norm, prefix='d_'):
         self.dim = dim
-        self.o_dim = o_dim if (o_dim > 0) else 8 * dim
+        self.o_dim = o_dim 
         self.prefix = prefix
         self.used = False
         if use_batch_norm:
@@ -134,20 +134,32 @@ class Discriminator:
 
 class DCGANDiscriminator(Discriminator):        
     def network(self, image, batch_size):
+        o_dim = self.o_dim if (self.o_dim > 0) else 8 * self.dim
         h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv')) 
         h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv')))
         h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv')))
         h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv')))
-        hF = linear(tf.reshape(h3, [batch_size, -1]), self.o_dim, self.prefix + 'h4_lin')
+        hF = linear(tf.reshape(h3, [batch_size, -1]), o_dim, self.prefix + 'h4_lin')
         
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF}
 
+class DCGAN5Discriminator(Discriminator):
+    def network(self, image, batch_size):
+        o_dim = self.o_dim if (self.o_dim > 0) else 16 * self.dim
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv'))
+        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv')))
+        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv')))
+        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv')))
+        h4 = lrelu(self.d_bn4(conv2d(h3, self.dim * 16, name=self.prefix + 'h4_conv')))
+        hF = linear(tf.reshape(h4, [batch_size, -1]), o_dim, self.prefix + 'h6_lin')
+        
+        return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}        
         
 def get_networks(architecture):
     if 'dcgan' in architecture:
         return DCGANGenerator, DCGANDiscriminator
-    elif 'resnet5' in architecture:
-        return ResNetGenerator, DCGANDiscriminator
+    elif 'g-resnet5' in architecture:
+        return ResNetGenerator, DCGAN5Discriminator
 
 #    def generator(self, z, y=None, is_train=True, reuse=False, batch_size=None):
 #        if batch_size is None:

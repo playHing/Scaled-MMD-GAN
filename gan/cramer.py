@@ -7,6 +7,7 @@ from utils import variable_summaries, safer_norm
 from cholesky import me_loss
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from glob import glob
+from architecture import get_networks
 import os
 import time
 
@@ -24,29 +25,30 @@ class Cramer_GAN(MMD_GAN):
                                                       self.z_dim)).astype(np.float32),
                                     dtype=tf.float32, name='sample_z')
 
-        self.G = self.generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1.,
-                                                   maxval=1., dtype=tf.float32, name='z'))
-        self.G2 = self.generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1.,
+        Generator, Discriminator = get_networks(self.config.architecture)
+        generator = Generator(self.gf_dim, self.c_dim, self.output_size, self.config.batch_norm)
+        self.discriminator = Discriminator(self.df_dim, self.dof_dim, self.config.batch_norm & (self.config.gradient_penalty <= 0))
+
+
+        self.G = generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1.,
+                                                   maxval=1., dtype=tf.float32, name='z'),
+                           self.batch_size)
+        self.G2 = generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1.,
                                                     maxval=1., dtype=tf.float32, name='z2'),
-                                reuse=True, batch_size=self.batch_size)
-        self.sampler = self.generator(self.sample_z, is_train=False, reuse=True,
-                                      batch_size=self.sample_size)
+                           self.batch_size)
+        self.sampler = generator(self.sample_z, self.sample_size)
         
         if self.check_numerics:
             self.G = tf.check_numerics(self.G, 'self.G')
             self.G2 = tf.check_numerics(self.G2, 'self.G2')
             
         if self.config.dc_discriminator:
-            self.d_images_layers = self.discriminator(self.images, reuse=False, 
-                        batch_size=self.real_batch_size, return_layers=True)
-            self.d_G_layers = self.discriminator(self.G, reuse=True,
-                                                 return_layers=True)
+            self.d_images_layers = self.discriminator(self.images, self.real_batch_size, return_layers=True)
+            self.d_G_layers = self.discriminator(self.G, self.batch_size, return_layers=True)
             self.d_images = self.d_images_layers['hF']
             self.d_G = self.d_G_layers['hF']
             
-#            images = self.discriminator(self.images, reuse=False, batch_size=self.real_batch_size)
-            G2 = self.discriminator(self.G2, reuse=True)
-#            self.d_G = self.discriminator(self.G, reuse=True)
+            G2 = self.discriminator(self.G2, self.batch_size)
         else:
             self.d_images = tf.reshape(self.images, [self.real_batch_size, -1])
             self.d_G = tf.reshape(self.G, [self.batch_size, -1])
@@ -67,7 +69,7 @@ class Cramer_GAN(MMD_GAN):
 
         if 'distance' in self.config.Loss_variance:
             self.Loss_variance = Loss_variance(self.sess, self.dof_dim, 
-                                               lambda x, bs: self.discriminator(x, batch_size=bs, reuse=True),
+                                               lambda x, bs: self.discriminator(x, bs),
                                                kernel_name='distance')
 
         self.saver = tf.train.Saver(max_to_keep=2)
@@ -91,7 +93,7 @@ class Cramer_GAN(MMD_GAN):
         x_hat_data = (1. - alpha) * real_data + alpha * fake_data
         if self.check_numerics:
             x_hat_data = tf.check_numerics(x_hat_data, 'x_hat_data')
-        x_hat = self.discriminator(x_hat_data, reuse=True, batch_size=bs)
+        x_hat = self.discriminator(x_hat_data, bs)
         
         critic = lambda x, x_ : safer_norm(x - x_, axis=1) - safer_norm(x, axis=1) 
         

@@ -33,7 +33,7 @@ class GAN(MMD_GAN):
         fake_data = self.G
         differences = fake_data - real_data
         interpolates0 = real_data + (alpha*differences)
-        interpolates = self.discriminator(interpolates0, reuse=True)
+        interpolates = self.discriminator(interpolates0, self.batch_size)
 
         # with tf.variable_scope("discriminator") as scope:
         #     G1 = linear(G, 1, 'd_htop_lin')

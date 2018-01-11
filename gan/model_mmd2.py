@@ -172,11 +172,9 @@ class MMD_GAN(object):
         generator = Generator(self.gf_dim, self.c_dim, self.output_size, self.config.batch_norm)
         self.discriminator = Discriminator(self.df_dim, self.dof_dim, self.config.batch_norm & (self.config.gradient_penalty <= 0))
         # tf.summary.histogram("z", self.z)
-        if not self.config.single_batch_experiment:
-            self.G = generator(self.z, self.batch_size)
-        else:
-            self.G = generator(self.sample_z, self.batch_size)
-            self.images = tf.constant(self.additional_sample_images, dtype=tf.float32, name='im')
+
+        self.G = generator(self.z, self.batch_size)
+
         
         if self.check_numerics:
             self.G = tf.check_numerics(self.G, 'self.G')
@@ -228,24 +226,8 @@ class MMD_GAN(object):
         if self.check_numerics:
             G = tf.check_numerics(G, 'G')
             images = tf.check_numerics(images, 'images')
-        if self.config.kernel == 'di': # Distance - induced kernel
-            self.di_kernel_z_images = tf.constant(
-                self.additional_sample_images,
-                dtype=tf.float32,                                  
-                name='di_kernel_z_images'
-            )
-            alphas = [1.0]
-            di_r = np.random.choice(np.arange(self.batch_size))
-            if self.config.dc_discriminator:
-                self.di_kernel_z = self.discriminator(
-                        self.di_kernel_z_images, self.batch_size)[di_r: di_r + 1]
-            else:
-                self.di_kernel_z = tf.reshape(self.di_kernel_z_images[di_r: di_r + 1], [1, -1])
-            kernel = lambda gg, ii, K_XY_only=False: MMD._mix_di_kernel(
-                    gg, ii, self.di_kernel_z, alphas=alphas, K_XY_only=K_XY_only)
-        else:
-            kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
-            
+
+        kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
         kerGI = kernel(G, images)
         
         if _debug:
@@ -462,8 +444,6 @@ class MMD_GAN(object):
         self.sess.run(tf.local_variables_initializer())
         self.sess.run(tf.global_variables_initializer())
         print('[*] Variables initialized.')
-#        if self.dataset == 'lsun':
-#            self.additional_sample_images = self.sess.run(self.images)
         
         self.TrainSummary = tf.summary.merge_all()
         
@@ -528,8 +508,6 @@ class MMD_GAN(object):
 
         for j in np.arange(1, len(streams)):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
-        off = int(np.random.rand()*( data_X.shape[0] - self.batch_size*2))
-        self.additional_sample_images = data_X[off: off + self.batch_size].astype(np.float32)
 
         
     def set_input3_pipeline(self, streams=None):
@@ -561,8 +539,6 @@ class MMD_GAN(object):
         choice = np.random.choice(len(self.files), 1)[0]
         sampled = get_read_batch(choice, self.sample_size + self.batch_size)
 
-        self.additional_sample_images = sampled[self.sample_size: self.sample_size + self.batch_size]
-        print('self.additional_sample_images.shape: ' + repr(self.additional_sample_images.shape))
         # tf queue for getting keys
 #        key_producer = tf.train.string_input_producer(keys, shuffle=True)
         key_producer = tf.train.range_input_producer(len(self.files), shuffle=True)
@@ -681,8 +657,6 @@ class MMD_GAN(object):
         choice = np.random.choice(keys, 1)[0]
         sampled = get_sample_from_lmdb(choice, self.sample_size + self.batch_size)
 
-        self.additional_sample_images = sampled[self.sample_size: self.sample_size + self.batch_size]
-        print('self.additional_sample_images.shape: ' + repr(self.additional_sample_images.shape))
         # tf queue for getting keys
         key_producer = tf.train.string_input_producer(keys, shuffle=True)
         single_key = key_producer.dequeue()
@@ -710,13 +684,35 @@ class MMD_GAN(object):
     def set_pipeline(self):
         if 'lsun' in self.dataset:
             if 'lmdb' in self.config.suffix:
-                self.set_lmdb_pipeline()
-            else:
-                self.set_tf_records_pipeline()
-        elif self.dataset == 'celebA':
-            self.set_jpeg_pipeline()
+                from pipeline import LMDB as Pipeline
+        elif self.dataset == 'celebA':        
+            from pipeline import JPEG as Pipeline
+        elif self.dataset == 'mnist':
+            from pipeline import Mnist as Pipeline
+        elif self.dataset == 'cifar10':
+            from pipeline import Cifar10 as Pipeline
+        elif self.dataset == 'GaussianMix':
+            from pipeline import GaussianMix as Pipeline
         else:
-            self.set_input_pipeline()
+            raise Exception('invalid dataset: %s' % self.dataset)
+        pipe = Pipeline(self.output_size, self.c_dim, self.real_batch_size, 
+                        os.path.join(self.data_dir, self.dataset), 
+                        timer=self.timer, sample_dir=self.sample_dir)
+        self.images = pipe.connect()        
+#        if 'lsun' in self.dataset:
+#            if 'lmdb' in self.config.suffix:
+#                self.set_lmdb_pipeline()
+#            else:
+#                self.set_tf_records_pipeline()
+#        elif self.dataset == 'celebA':
+##            self.set_jpeg_pipeline()
+#            from pipeline import JPEG as Pipeline
+#            pipe = Pipeline(self.output_size, self.c_dim, self.real_batch_size, 
+#                            os.path.join(self.data_dir, self.dataset), 
+#                            timer=self.timer)
+#            self.images = pipe.connect()
+#        else:
+#            self.set_input_pipeline()
 
             
     def train(self):    
@@ -733,9 +729,9 @@ class MMD_GAN(object):
             if self.config.save_layer_outputs:
                 self.save_layers(step)
             if self.dataset == 'GaussianMix':
-                self.make_video(step, self.G_config, g_loss)
+                self.make_video(step, self.pipe.G_config, g_loss)
         if self.dataset == 'GaussianMix':
-            self.G_config['writer'].finish()   
+            self.pipe.G_config['writer'].finish()   
             
         coord.request_stop()
         coord.join(threads)
