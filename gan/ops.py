@@ -3,7 +3,7 @@ import tensorflow as tf
 from tensorflow.python.framework import ops
 
 from utils import variable_summaries
-from mmd import _check_numerics
+from mmd import _check_numerics, _eps
 
 
 #class batch_norm(object):
@@ -205,3 +205,9 @@ class linear_n:
     def l2_normalize_op(self):
         self.W = self.W * (self.scale_ / tf.sqrt(
             1e-6 + tf.reduce_sum(tf.square(self.W), 0)))
+
+
+def safer_norm(tensor, axis=None, keep_dims=False, epsilon=_eps):
+    sq = tf.square(tensor)
+    squares = tf.reduce_sum(sq, axis=axis, keep_dims=keep_dims)
+    return tf.sqrt(squares + epsilon)

@@ -6,7 +6,6 @@ import time
 import numpy as np
 import scipy.misc
 import scipy
-from six.moves import xrange
 import tensorflow as tf
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -17,12 +16,14 @@ from IPython.display import display
 
 import mmd as MMD
 import load
-from ops import batch_norm, conv2d, deconv2d, linear, lrelu
-from utils import *
+from ops import safer_norm
+import utils
 import pprint
 from mmd import _eps, _check_numerics, _debug
+from architecture import get_networks
+from scorer import Scorer
 
-from compute_scores import *
+#from compute_scores import *
 
 class MMD_GAN(object):
     def __init__(self, sess, config, 
@@ -42,7 +43,7 @@ class MMD_GAN(object):
             dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
-        self.timer = Timer()
+        self.timer = utils.Timer()
         self.check_numerics = _check_numerics
         self.dataset = config.dataset
         if config.architecture == 'dc128':
@@ -90,39 +91,7 @@ class MMD_GAN(object):
         self.df_dim = config.df_dim
         self.dof_dim = self.config.dof_dim
 
-        self.c_dim = c_dim
-
-        # G batch normalization : deals with poor initialization helps gradient flow
-        if self.config.batch_norm:
-            self.g_bn0 = batch_norm(name='g_bn0')
-            self.g_bn1 = batch_norm(name='g_bn1')
-            self.g_bn2 = batch_norm(name='g_bn2')
-            self.g_bn3 = batch_norm(name='g_bn3')
-            self.g_bn4 = batch_norm(name='g_bn4')
-            self.g_bn5 = batch_norm(name='g_bn5')
-        else:
-            self.g_bn0 = lambda x: x
-            self.g_bn1 = lambda x: x
-            self.g_bn2 = lambda x: x
-            self.g_bn3 = lambda x: x
-            self.g_bn4 = lambda x: x
-            self.g_bn5 = lambda x: x
-        # D batch normalization
-        if self.config.batch_norm and (self.config.gradient_penalty <= 0):
-            self.d_bn0 = batch_norm(name='d_bn0')
-            self.d_bn1 = batch_norm(name='d_bn1')
-            self.d_bn2 = batch_norm(name='d_bn2')
-            self.d_bn3 = batch_norm(name='d_bn3')
-            self.d_bn4 = batch_norm(name='d_bn4')
-            self.d_bn5 = batch_norm(name='d_bn5')
-        else:
-            self.d_bn0 = lambda x: x
-            self.d_bn1 = lambda x: x
-            self.d_bn2 = lambda x: x
-            self.d_bn3 = lambda x: x
-            self.d_bn4 = lambda x: x
-            self.d_bn5 = lambda x: x
-            
+        self.c_dim = c_dim            
         
         discriminator_desc = '_dc' if self.config.dc_discriminator else ''
         d_clip = self.config.discriminator_weight_clip
@@ -199,22 +168,24 @@ class MMD_GAN(object):
                                                       self.z_dim)).astype(np.float32),
                                     dtype=tf.float32, name='sample_z')        
 
+        Generator, Discriminator = get_networks(self.config.architecture)
+        generator = Generator(self.gf_dim, self.c_dim, self.output_size, self.config.batch_norm)
+        self.discriminator = Discriminator(self.df_dim, self.dof_dim, self.config.batch_norm & (self.config.gradient_penalty <= 0))
         # tf.summary.histogram("z", self.z)
         if not self.config.single_batch_experiment:
-            self.G = self.generator(self.z)
+            self.G = generator(self.z, self.batch_size)
         else:
-            self.G = self.generator(self.sample_z)
+            self.G = generator(self.sample_z, self.batch_size)
             self.images = tf.constant(self.additional_sample_images, dtype=tf.float32, name='im')
         
         if self.check_numerics:
             self.G = tf.check_numerics(self.G, 'self.G')
-        self.sampler = self.generator(self.sample_z, is_train=False, reuse=True, 
-                                      batch_size=self.sample_size)
+        self.sampler = generator(self.sample_z, self.sample_size)
         
         if self.config.dc_discriminator:
-            self.d_images_layers = self.discriminator(self.images, reuse=False, 
-                        batch_size=self.real_batch_size, return_layers=True)
-            self.d_G_layers = self.discriminator(self.G, reuse=True,
+            self.d_images_layers = self.discriminator(self.images, 
+                self.real_batch_size, return_layers=True)
+            self.d_G_layers = self.discriminator(self.G, self.batch_size,
                                                  return_layers=True)
             self.d_images = self.d_images_layers['hF']
             self.d_G = self.d_G_layers['hF']
@@ -223,7 +194,7 @@ class MMD_GAN(object):
             self.d_G = tf.reshape(self.G, [self.batch_size, -1])
         
         if _debug:
-            variable_summaries({'Dreal': self.d_images, 'Dfake': self.d_G})
+            utils.variable_summaries({'Dreal': self.d_images, 'Dfake': self.d_G})
             tf.summary.scalar('norm_Dfake', tf.norm(self.d_G))
             tf.summary.scalar('nomr_Dreal', tf.norm(self.d_images))
             tf.summary.scalar('norm_diff_Dreal_Dfake', tf.norm(self.d_G - self.d_images))
@@ -245,9 +216,9 @@ class MMD_GAN(object):
         self.saver = tf.train.Saver(max_to_keep=2)
 
         if 'distance' in self.config.Loss_variance:
-            self.Loss_variance = Loss_variance(
+            self.Loss_variance = utils.Loss_variance(
                 self.sess, self.dof_dim, 
-                lambda x, bs: self.discriminator(x, batch_size=bs, reuse=True),
+                lambda x, bs: self.discriminator(x, bs),
                 kernel_name='distance'
             )
             
@@ -267,7 +238,7 @@ class MMD_GAN(object):
             di_r = np.random.choice(np.arange(self.batch_size))
             if self.config.dc_discriminator:
                 self.di_kernel_z = self.discriminator(
-                        self.di_kernel_z_images, reuse=True)[di_r: di_r + 1]
+                        self.di_kernel_z_images, self.batch_size)[di_r: di_r + 1]
             else:
                 self.di_kernel_z = tf.reshape(self.di_kernel_z_images[di_r: di_r + 1], [1, -1])
             kernel = lambda gg, ii, K_XY_only=False: MMD._mix_di_kernel(
@@ -278,7 +249,7 @@ class MMD_GAN(object):
         kerGI = kernel(G, images)
         
         if _debug:
-            variable_summaries({'K_XX': kerGI[0], 'K_XY': kerGI[1], 'K_YY': kerGI[2]})
+            utils.variable_summaries({'K_XX': kerGI[0], 'K_XY': kerGI[1], 'K_YY': kerGI[2]})
             
         with tf.variable_scope('loss'):
             if self.config.model in ['mmd', 'mmd_gan']:
@@ -331,7 +302,7 @@ class MMD_GAN(object):
             x_hat_data = (1. - alpha) * real_data + alpha * fake_data
             if self.check_numerics:
                 x_hat_data = tf.check_numerics(x_hat_data, 'x_hat_data')
-            x_hat = self.discriminator(x_hat_data, reuse=True)
+            x_hat = self.discriminator(x_hat_data, bs)
             if self.check_numerics:
                 x_hat = tf.check_numerics(x_hat, 'x_hat')
             Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
@@ -351,7 +322,7 @@ class MMD_GAN(object):
             real_data = self.images #before discirminator
             fake_data = self.G #before discriminator
             x_hat_data = (1. - alpha) * real_data + alpha * fake_data
-            x_hat = self.discriminator(x_hat_data, reuse=True)
+            x_hat = self.discriminator(x_hat_data, bs)
             gradients = tf.gradients(x_hat, [x_hat_data])[0]
         
         if self.check_numerics:  
@@ -525,8 +496,8 @@ class MMD_GAN(object):
             data_X, data_y = getattr(load, self.dataset)(path)
         elif self.dataset in ['celebA']:
             files = glob(os.path.join(self.data_dir, self.dataset, '*.jpg'))
-            data_X = np.array([get_image(f, 160, 160, resize_height=self.output_size, 
-                                         resize_width=self.output_size) for f in files[:]])
+            data_X = np.array([utils.get_image(f, 160, 160, resize_height=self.output_size, 
+                                               resize_width=self.output_size) for f in files[:]])
         elif self.dataset == 'GaussianMix':
             G_config = {'g_line': None}
             path = os.path.join(self.sample_dir, self.description)
@@ -581,8 +552,8 @@ class MMD_GAN(object):
                 ims = []
                 files_k = self.files[k: k + read_batch] + self.files[: max(0, k + read_batch - len(self.files))]
                 for ii, ff in enumerate(files_k):
-                    ims.append(get_image(ff, 160, 160, resize_height=self.output_size, 
-                                                  resize_width=self.output_size))
+                    ims.append(utils.get_image(ff, 160, 160, resize_height=self.output_size, 
+                                               resize_width=self.output_size))
                 self.timer(rc, 'read time = %f' % (time.time() - tt))
                 return np.asarray(ims, dtype=np.float32)                
                 
@@ -620,10 +591,10 @@ class MMD_GAN(object):
             streams = [self.real_batch_size]
         streams = np.cumsum(streams)
         files = glob(os.path.join(self.data_dir, self.dataset, '*.jpg'))
-        ims = tf_read_jpeg(files, 
-                           base_size=160, target_size=self.output_size, 
-                           batch_size=streams[-1], 
-                           capacity=4000, num_threads=4)
+        ims = utils.tf_read_jpeg(files, 
+                               base_size=160, target_size=self.output_size, 
+                               batch_size=streams[-1], 
+                               capacity=4000, num_threads=4)
         self.images = ims[:streams[0]]
         for j in np.arange(1, len(streams)):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
@@ -651,18 +622,15 @@ class MMD_GAN(object):
             image = tf.image.decode_jpeg(features['image/encoded'])
             single_sample = tf.cast(image, tf.float32)/255.
             single_sample.set_shape([self.output_size, self.output_size, self.c_dim])
-            
-            print('pipeline 0')
+
             ims = tf.train.shuffle_batch([single_sample], bs,
                                          capacity=bs * 8,
                                          min_after_dequeue=bs * 2, 
                                          num_threads=16,
                                          enqueue_many=False)
-        print('pipeline 1')
         self.images = ims[:streams[0]]
         for j in np.arange(1, len(streams)):
             self.__dict__.update({'images%d' % (j + 1): ims[streams[j - 1]: streams[j]]})
-        print('pipeline end')
             
     def set_lmdb_pipeline(self, streams=None):
         if streams is None:
@@ -701,7 +669,7 @@ class MMD_GAN(object):
                         byte_im.seek(0)
                         try:
                             im = Image.open(byte_im)
-                            ims.append(center_and_scale(im, size=self.output_size))
+                            ims.append(utils.center_and_scale(im, size=self.output_size))
                         except Exception as e:
                             print(e)
                         if not cursor.next():
@@ -750,211 +718,6 @@ class MMD_GAN(object):
         else:
             self.set_input_pipeline()
 
-            
-    def discriminator(self, image, y=None, reuse=False, batch_size=None, 
-                      return_layers=False):
-        if batch_size is None:
-            batch_size = self.batch_size
-        with tf.variable_scope("discriminator") as scope:
-            layers = {}
-            if reuse:
-                scope.reuse_variables()
-            if ('dcgan' in self.config.architecture): # default architecture
-                if self.dof_dim <= 0:
-                    self.dof_dim = self.df_dim * 8
-                # For Cramer:
-                # self.dof_dim = 256
-                # self.df_dim = 64
-                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv')) 
-                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
-                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
-                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
-                hF = linear(tf.reshape(h3, [batch_size, -1]), self.dof_dim, 'd_h4_lin')
-            elif 'dfc' in self.config.architecture:
-                h0 = lrelu(conv2d(image, self.df_dim, k_h=4, k_w=4, name='d_h0_conv'))
-                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, k_h=4, k_w=4, name='d_h1_conv')))
-                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, k_h=4, k_w=4, name='d_h2_conv')))
-                h3 = conv2d(h2, self.df_dim, d_h=4, d_w=4, k_h=4, k_w=4, name='d_h3_conv')
-                hF = tf.reshape(h3, [batch_size, self.df_dim])
-                self.dof_dim = self.df_dim
-            elif 'dcold' in self.config.architecture:
-                h0 = lrelu(conv2d(image, self.df_dim//8, name='d_h0_conv'))
-                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim//4, name='d_h1_conv')))
-                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim//2, name='d_h2_conv')))
-                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim, name='d_h3_conv')))
-                hF = linear(tf.reshape(h3, [batch_size, -1]), self.df_dim, 'd_h4_lin')
-                self.dof_dim = self.df_dim
-            elif ('dc64' in self.config.architecture)  or ('g-resnet5' in self.config.architecture):
-                if self.dof_dim <= 0:
-                    self.dof_dim = self.df_dim * 16
-                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
-                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
-                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
-                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
-                h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
-                hF = linear(tf.reshape(h4, [batch_size, -1]), self.dof_dim, 'd_h6_lin')
-                layers['h4'] = h4
-            elif 'dc128' in self.config.architecture:
-                if self.dof_dim <= 0:
-                    self.dof_dim = self.df_dim * 32
-                h0 = lrelu(conv2d(image, self.df_dim, name='d_h0_conv'))
-                h1 = lrelu(self.d_bn1(conv2d(h0, self.df_dim * 2, name='d_h1_conv')))
-                h2 = lrelu(self.d_bn2(conv2d(h1, self.df_dim * 4, name='d_h2_conv')))
-                h3 = lrelu(self.d_bn3(conv2d(h2, self.df_dim * 8, name='d_h3_conv')))
-                h4 = lrelu(self.d_bn4(conv2d(h3, self.df_dim * 16, name='d_h4_conv')))
-                h5 = lrelu(self.d_bn5(conv2d(h4, self.df_dim * 32, name='d_h5_conv')))
-                hF = linear(tf.reshape(h5, [batch_size, -1]), self.dof_dim , 'd_h6_lin')
-                layers.update({'h4': h4, 'h5': h5})
-            else:
-                raise ValueError("Choose architecture from  [dfc, dcold, dcgan, dc64, dc128]")
-            print(repr(image.get_shape()).replace('Dimension', '') + ' --> Discriminator --> ' + \
-                  repr(hF.get_shape()).replace('Dimension', ''))
-            
-            layers.update({'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF})
-            
-            if _debug:
-                variable_summaries(layers)
-            
-            if return_layers:
-                return layers
-                
-            return hF
-
-        
-    def generator(self, z, y=None, is_train=True, reuse=False, batch_size=None):
-        if batch_size is None:
-            batch_size = self.batch_size
-        if self.dataset not in ['mnist', 'cifar10', 'lsun', 'GaussianMix', 'celebA']:
-            raise ValueError("not implemented dataset '%s'" % self.dataset)
-        elif self.dataset in ['lsun', 'cifar10']:
-            if self.config.architecture == 'mlp':
-                return self.MLP_generator(z, is_train=is_train, reuse=reuse)
-        with tf.variable_scope('generator') as scope:
-            if reuse:
-                scope.reuse_variables()
-            s1, s2, s4, s8, s16 = conv_sizes(self.output_size, layers=4, stride=2)
-            # 64, 32, 16, 8, 4 - for self.output_size = 64
-            if 'dcgan' in self.config.architecture:
-                # default architecture
-                # For Cramer: self.gf_dim = 64
-                z_ = linear(z, self.gf_dim*8*s16*s16, 'g_h0_lin') # project random noise seed and reshape
-                
-                h0 = tf.reshape(z_, [batch_size, s16, s16, self.gf_dim * 8])
-                h0 = tf.nn.relu(self.g_bn0(h0))
-                
-                h1 = deconv2d(h0, [batch_size, s8, s8, self.gf_dim*4], name='g_h1')
-                h1 = tf.nn.relu(self.g_bn1(h1))
-                                
-                h2 = deconv2d(h1, [batch_size, s4, s4, self.gf_dim*2], name='g_h2')
-                h2 = tf.nn.relu(self.g_bn2(h2))
-                
-                h3 = deconv2d(h2, [batch_size, s2, s2, self.gf_dim*1], name='g_h3')
-                h3 = tf.nn.relu(self.g_bn3(h3))
-                
-                h4 = deconv2d(h3, [batch_size, s1, s1, self.c_dim], name='g_h4')
-                return tf.nn.sigmoid(h4)
-            
-            elif 'dfc' in self.config.architecture:
-                z_ = tf.reshape(z, [batch_size, 1, 1, -1])
-                h0 = tf.nn.relu(self.g_bn0(deconv2d(z_, 
-                    [batch_size, s8, s8, self.gf_dim * 4], name='g_h0_conv',
-                    k_h=4, k_w=4, d_h=4, d_w=4)))
-                h1 = tf.nn.relu(self.g_bn1(deconv2d(h0, 
-                    [batch_size, s4, s4, self.gf_dim * 2], name='g_h1_conv', k_h=4, k_w=4)))
-                h2 = tf.nn.relu(self.g_bn2(deconv2d(h1, 
-                    [batch_size, s2, s2, self.gf_dim], name='g_h2_conv', k_h=4, k_w=4)))
-                h3 = deconv2d(h2, [batch_size, s1, s1, self.c_dim], name='g_h3_conv', k_h=4, k_w=4)
-                return tf.nn.sigmoid(h3)
-            
-            elif 'dcold' in self.config.architecture:
-                # project `z` and reshape
-                self.z_, self.h0_w, self.h0_b = linear(
-                    z, self.gf_dim*8*s16*s16, 'g_h0_lin', with_w=True)
-
-                h0 = tf.nn.relu(self.g_bn0(self.z_))
-                
-                h1, self.h1_w, self.h1_b = linear(
-                        h0, self.gf_dim*4*s8*s8, 'g_h1_lin', with_w=True)
-                h1 = tf.nn.relu(self.g_bn1(tf.reshape(h1, [-1, s8, s8, self.gf_dim*4])))
-                
-                h2, self.h2_w, self.h2_b = deconv2d(
-                    h1, [batch_size, s4, s4, self.gf_dim*2], name='g_h2', with_w=True)
-                h2 = tf.nn.relu(self.g_bn2(h2))
-                
-                h3, self.h3_w, self.h3_b = deconv2d(
-                    h2, [batch_size, s2, s2, self.gf_dim*1], name='g_h3', with_w=True)
-                h3 = tf.nn.relu(self.g_bn3(h3))
-                
-                h4, self.h4_w, self.h4_b = deconv2d(
-                    h3, [batch_size, s1, s1, self.c_dim], name='g_h4', with_w=True)
-                return tf.nn.sigmoid(h4)
-            
-            elif 'dc64' in self.config.architecture:
-                s1, s2, s4, s8, s16, s32 = conv_sizes(self.output_size, layers=5, stride=2)
-                # project `z` and reshape
-                z_= linear(z, self.gf_dim*16*s32*s32, 'g_h0_lin')
-                
-                h0 = tf.reshape(z_, [-1, s32, s32, self.gf_dim * 16])
-                h0 = tf.nn.relu(self.g_bn0(h0))
-                
-                h1 = deconv2d(h0, [batch_size, s16, s16, self.gf_dim*8], name='g_h1')
-                h1 = tf.nn.relu(self.g_bn1(h1))
-                                
-                h2 = deconv2d(h1, [batch_size, s8, s8, self.gf_dim*4], name='g_h2')
-                h2 = tf.nn.relu(self.g_bn2(h2))
-
-                h3 = deconv2d(h2, [batch_size, s4, s4, self.gf_dim*2], name='g_h3')
-                h3 = tf.nn.relu(self.g_bn3(h3))
-
-                h4 = deconv2d(h3, [batch_size, s2, s2, self.gf_dim], name='g_h4')
-                h4 = tf.nn.relu(self.g_bn4(h4))                
-                
-                h5 = deconv2d(h4, [batch_size, s1, s1, self.c_dim], name='g_h5')
-                return tf.nn.sigmoid(h5)
-            
-            elif 'dc128' in self.config.architecture:
-                s1, s2, s4, s8, s16, s32, s64 = conv_sizes(self.output_size, layers=6, stride=2)
-                # project `z` and reshape
-                z_= linear(z, self.gf_dim*32*s64*s64, 'g_h0_lin')
-
-                h0 = tf.reshape(z_, [-1, s64, s64, self.gf_dim * 32])
-                h0 = tf.nn.relu(self.g_bn0(h0))
-
-                h1 = deconv2d(h0, [batch_size, s32, s32, self.gf_dim*16], name='g_h1')
-                h1 = tf.nn.relu(self.g_bn1(h1))
-
-                h2 = deconv2d(h1, [batch_size, s16, s16, self.gf_dim*8], name='g_h2')
-                h2 = tf.nn.relu(self.g_bn2(h2))
-
-                h3 = deconv2d(h2, [batch_size, s8, s8, self.gf_dim*4], name='g_h3')
-                h3 = tf.nn.relu(self.g_bn3(h3))
-
-                h4 = deconv2d(h3, [batch_size, s4, s4, self.gf_dim*2], name='g_h4')
-                h4 = tf.nn.relu(self.g_bn4(h4))
-
-                h5 = deconv2d(h4, [batch_size, s2, s2, self.gf_dim*1], name='g_h5')
-                h5 = tf.nn.relu(self.g_bn5(h5))
-
-                h6 = deconv2d(h5, [batch_size, s1, s1, self.c_dim], name='g_h6')
-                return tf.nn.sigmoid(h6)
-            elif 'resnet5' in self.config.architecture:
-                from resnet import ResidualBlock
-                import tflib as lib
-                s1, s2, s4, s8, s16, s32 = conv_sizes(self.output_size, layers=5, stride=2)
-                # project `z` and reshape
-                z_= linear(z, self.gf_dim*16*s32*s32, 'g_h0_lin')
-                dim = self.gf_dim
-                h0 = tf.reshape(z_, [-1, dim * 16, s32, s32]) # NCHW format
-                h1 = ResidualBlock('g_res1',16*dim, 8*dim, 3, h0, resample='up')
-                h2 = ResidualBlock('g_res2', 8*dim, 4*dim, 3, h1, resample='up')
-                h3 = ResidualBlock('g_res3', 4*dim, 2*dim, 3, h2, resample='up')
-                h4 = ResidualBlock('g_res4', 2*dim, 1*dim, 3, h3, resample='up')
-                h4 = lib.ops.batchnorm.Batchnorm('g_h4', [0, 2, 3], h4, fused=True)
-                h4 = tf.nn.relu(h4)
-#                h5 = lib.ops.conv2d.Conv2D('g_h5', dim, 3, 3, h4)
-                h5 = tf.transpose(h4, [0, 2, 3, 1]) # NCHW to NHWC
-                h5 = deconv2d(h5, [batch_size, s1, s1, self.c_dim], name='g_h5')
-                return tf.nn.sigmoid(h5)
             
     def train(self):    
         self.train_init()
@@ -1044,11 +807,15 @@ class MMD_GAN(object):
             samples = self.sess.run(self.sampler)
             self._ensure_dirs('sample')
             p = os.path.join(self.sample_dir, 'train_{:02d}.png'.format(step))
-            save_images(samples[:64, :, :, :], [8, 8], p)  
+            utils.save_images(samples[:64, :, :, :], [8, 8], p)  
             
             
     def save_layers(self, step, freq=1000, n=256, layers=[-1, -2]):
-        if (np.mod(step, freq) == 0) and (self.d_counter == 0):
+        c = self.config.save_layer_outputs
+        valid = list(freq * np.arange(self.config.max_iteration/freq + 1))
+        if c > 1:
+            valid += [int(k) for k in c**np.arange(np.log(freq)/np.log(c))]
+        if (step in valid) and (self.d_counter == 0):
             if not (layers == 'all'):
                 keys = [sorted(list(self.d_G_layers))[i] for i in layers]
             fake = [(key + '_fake', self.d_G_layers[key]) for key in keys] 
@@ -1137,161 +904,3 @@ class MMD_GAN(object):
             G_config['writer'].grab_frame()
             if step % 100 == 0:
                 display(G_config['fig'])
-
-                
-class Scorer(object):
-    def __init__(self, dataset, lr_scheduler=True):
-        self.dataset = dataset
-        if dataset == 'mnist':
-            self.model = LeNet()
-            self.size = 100000
-            self.frequency = 500
-        else:
-            self.model = Inception()
-            self.size = 25000
-            self.frequency = 2000
-        
-        self.output = []
-
-        if lr_scheduler:
-            self.three_sample = []
-            self.three_sample_chances = 0
-        self.lr_scheduler = lr_scheduler
-            
-    def set_train_codes(self, gan):
-        suffix = '' if (gan.output_size <= 32) else ('-%d' % gan.output_size)
-        path = os.path.join(gan.data_dir, '%s-codes%s.npy' % (self.dataset, suffix))
-      
-        if os.path.exists(path):
-            self.train_codes = np.load(path)
-            print('[*] Train codes loaded. ')
-            return
-        print('[!] Codes not found. Featurizing...')    
-        ims = []
-        while len(ims) < self.size // gan.batch_size:
-            ims.append(gan.sess.run(gan.images))
-        ims = np.concatenate(ims, axis=0)[:self.size]
-        _, self.train_codes = featurize(ims * 255., self.model, get_preds=True, get_codes=True)
-        np.save(path, self.train_codes)
-        print('[*] %d train images featurized and saved in <%s>' % (self.size, path))
-                    
-    def compute(self, gan, step):
-        if step % self.frequency != 0:
-            return
-            
-        if not hasattr(self, 'train_codes'):
-            print('[ ] Getting train codes...')
-            self.set_train_codes(gan)
-            
-        tt = time.time()
-        gan.timer(step, "Scoring start")
-        output = {}
-        images4score = gan.get_samples(n=self.size, save=False)
-        if self.dataset == 'mnist': #LeNet model takes [-.5, .5] pics
-            images4score -= .5
-            if (images4score.max() > .5) or (images4score.min() < -.5):
-                print('WARNING! LeNet min/max violated: min, max = ', images4score.min(), images4score.max())
-                images4score = images4score.clip(-.5, .5)
-        else: #Inception model takes [0 , 255] pics
-            images4score *= 255.0
-            if (images4score.max() > 255.) or (images4score.min() < .0):
-                print('WARNING! Inception min/max violated: min, max = ', images4score.min(), images4score.max())
-                images4score = images4score.clip(0., 255.)
-                
-        preds, codes = featurize(images4score, self.model,
-                                 get_preds=True, get_codes=True)
-        gan.timer(step, "featurizing finished")
-        
-        output['inception'] = scores = inception_score(preds)
-        gan.timer(step, "Inception mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
-        
-        output['fid'] = scores = fid_score(codes, self.train_codes, 
-                                           split_method='bootstrap',
-                                           splits=3)
-        gan.timer(step, "FID mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
-        
-        ret = polynomial_mmd_averages(codes, self.train_codes, 
-                                n_subsets=10, subset_size=1000, 
-                                ret_var=False)
-        output['mmd2'] = mmd2s = ret
-        gan.timer(step, "KID mean (std): %f (%f)" % (mmd2s.mean(), mmd2s.std()))           
-        
-        if len(self.output) > 0:
-            if np.min([sc['mmd2'].mean() for sc in self.output]) > output['mmd2'].mean():
-                print('Saving BEST model (so far)')
-                gan.save(gan.checkpoint_dir, None)
-        self.output.append(output)
-                
-        
-        filepath = os.path.join(gan.sample_dir, 'score%d.npz' % step)
-        np.savez(filepath, **output)
-
-        
-        if self.lr_scheduler:
-            n = 10
-            if self.dataset == 'mnist':
-                n = 10
-            nc = 3
-            bs = 2048
-            new_Y = codes[:bs]
-            X = self.train_codes[:bs]
-            print('3-sample stats so far: %d' % len(self.three_sample))
-            if len(self.three_sample) >= n:
-                saved_Z = self.three_sample[0]
-                mmd2_diff, test_stat, Y_related_sums = \
-                    MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, saved_Z)
-                p_val = scipy.stats.norm.cdf(test_stat)
-                gan.timer(step, "3-sample test stat = %.1f" % test_stat)
-                gan.timer(step, "3-sample p-value = %.1f" % p_val)
-                if p_val > .1:
-                    self.three_sample_chances += 1
-                    if self.three_sample_chances >= nc:
-                        # no confidence that new Y sample is closer to X than old Z is
-                        gan.sess.run(gan.lr_decay_op)
-                        print('No improvement in last %d tests. Decreasing learning rate to %f' % \
-                              (nc, gan.sess.run(gan.lr)))
-                        self.three_sample = (self.three_sample + [Y_related_sums])[-nc:] # reset memorized sums
-                        self.three_sample_chances = 0
-                    else:
-                        print('No improvement in last %d test(s). Keeping learning rate at %f' % \
-                              (self.three_sample_chances, gan.sess.run(gan.lr)))
-                else:
-                    # we're confident that new_Y is better than old_Z is
-                    print('Keeping learning rate at %f' % gan.sess.run(gan.lr))
-                    self.three_sample = self.three_sample[1:] + [Y_related_sums]
-                    self.three_sample_chances = 0
-            else: # add new sums to memory
-                self.three_sample.append(
-                    MMD.np_diff_polynomial_mmd2_and_ratio_with_saving(X, new_Y, None)
-                )
-                gan.timer(step, "computing stats for 3-sample test finished")    
-                print('current learning rate: %f' % gan.sess.run(gan.lr))
-                
-        gan.timer(step, "Scoring end, total time = %.1f s" % (time.time() - tt))
-        
-
-def hms(start_time):
-    t = int(time.time() - start_time)
-    m, s = t//60, t % 60
-    h, m = m//60, m % 60
-    if h > 0:
-        return '%2dh%02dm%02ds' % (h, m, s)
-    elif m > 0:
-        return '%5dm%02ds' % (m, s)
-    else:
-        return '%8ds' % s
-    
-class Timer(object):
-    def __init__(self, start_time=time.time(), limit=100):
-        self.start_time = start_time
-        self.limit = limit
-        
-    def __call__(self, step, mess='', prints=True):
-        if prints and (step % self.limit != 0) and (step > 10):
-            return
-        message = '[%8d][%s] %s' % (step, hms(self.start_time), mess)
-        if prints:
-            print(message)
-        else:
-            return message
-            

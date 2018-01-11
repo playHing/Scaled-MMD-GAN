@@ -10,17 +10,11 @@ import scipy.misc
 import numpy as np
 from time import gmtime, strftime
 import tensorflow as tf
-from mmd import _eps
 import time
 
 from six.moves import xrange
 
 pp = pprint.PrettyPrinter()
-
-def safer_norm(tensor, axis=None, keep_dims=False, epsilon=_eps):
-    sq = tf.square(tensor)
-    squares = tf.reduce_sum(sq, axis=axis, keep_dims=keep_dims)
-    return tf.sqrt(squares + epsilon)
 
 def inverse_transform(images):
     return (images+1.)/2.
@@ -410,3 +404,29 @@ def PIL_read_jpeg(files, base_size=160, target_size=64, batch_size=128,
     )
     
     return images
+
+        
+def hms(start_time):
+    t = int(time.time() - start_time)
+    m, s = t//60, t % 60
+    h, m = m//60, m % 60
+    if h > 0:
+        return '%2dh%02dm%02ds' % (h, m, s)
+    elif m > 0:
+        return '%5dm%02ds' % (m, s)
+    else:
+        return '%8ds' % s
+    
+class Timer(object):
+    def __init__(self, start_time=time.time(), limit=100):
+        self.start_time = start_time
+        self.limit = limit
+        
+    def __call__(self, step, mess='', prints=True):
+        if prints and (step % self.limit != 0) and (step > 10):
+            return
+        message = '[%8d][%s] %s' % (step, hms(self.start_time), mess)
+        if prints:
+            print(message)
+        else:
+            return message
