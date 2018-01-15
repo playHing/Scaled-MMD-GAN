@@ -22,6 +22,7 @@ import pprint
 from mmd import _eps, _check_numerics, _debug
 from architecture import get_networks
 from scorer import Scorer
+import pipeline
 
 #from compute_scores import *
 
@@ -682,37 +683,11 @@ class MMD_GAN(object):
             
             
     def set_pipeline(self):
-        if 'lsun' in self.dataset:
-            if 'lmdb' in self.config.suffix:
-                from pipeline import LMDB as Pipeline
-        elif self.dataset == 'celebA':        
-            from pipeline import JPEG as Pipeline
-        elif self.dataset == 'mnist':
-            from pipeline import Mnist as Pipeline
-        elif self.dataset == 'cifar10':
-            from pipeline import Cifar10 as Pipeline
-        elif self.dataset == 'GaussianMix':
-            from pipeline import GaussianMix as Pipeline
-        else:
-            raise Exception('invalid dataset: %s' % self.dataset)
+        Pipeline = pipeline.get_pipeline(self.dataset, self.config.suffix)
         pipe = Pipeline(self.output_size, self.c_dim, self.real_batch_size, 
                         os.path.join(self.data_dir, self.dataset), 
                         timer=self.timer, sample_dir=self.sample_dir)
         self.images = pipe.connect()        
-#        if 'lsun' in self.dataset:
-#            if 'lmdb' in self.config.suffix:
-#                self.set_lmdb_pipeline()
-#            else:
-#                self.set_tf_records_pipeline()
-#        elif self.dataset == 'celebA':
-##            self.set_jpeg_pipeline()
-#            from pipeline import JPEG as Pipeline
-#            pipe = Pipeline(self.output_size, self.c_dim, self.real_batch_size, 
-#                            os.path.join(self.data_dir, self.dataset), 
-#                            timer=self.timer)
-#            self.images = pipe.connect()
-#        else:
-#            self.set_input_pipeline()
 
             
     def train(self):    
