@@ -55,7 +55,7 @@ flags.DEFINE_float("L2_discriminator_penalty", 0.0, "L2 penalty on discriminator
 flags.DEFINE_string("Loss_variance", "", "which loss variance to monitor")
 flags.DEFINE_integer("no_of_samples", 100000, "number of samples to produce")
 flags.DEFINE_boolean("print_pca", False, "")
-flags.DEFINE_boolean("save_layer_outputs", False, "")
+flags.DEFINE_integer("save_layer_outputs", 0, "")
 flags.DEFINE_integer("witness_update_frequency", 100, "")
 FLAGS = flags.FLAGS
 

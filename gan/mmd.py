@@ -121,6 +121,26 @@ def _mix_rq_dot_kernel(X, Y, alphas=[.1, 1., 10.], wts=None,
     return _mix_rq_kernel(X, Y, alphas=alphas, wts=wts, K_XY_only=K_XY_only, 
                           check_numerics=check_numerics, add_dot=.1)
 
+def _mix_rq_1dot_kernel(X, Y, alphas=[.1, 1., 10.], wts=None, 
+                       K_XY_only=False, check_numerics=_check_numerics):
+    return _mix_rq_kernel(X, Y, alphas=alphas, wts=wts, K_XY_only=K_XY_only, 
+                          check_numerics=check_numerics, add_dot=1.)
+    
+def _mix_rq_10dot_kernel(X, Y, alphas=[.1, 1., 10.], wts=None, 
+                       K_XY_only=False, check_numerics=_check_numerics):
+    return _mix_rq_kernel(X, Y, alphas=alphas, wts=wts, K_XY_only=K_XY_only, 
+                          check_numerics=check_numerics, add_dot=10.)
+
+def _mix_rq_01dot_kernel(X, Y, alphas=[.1, 1., 10.], wts=None, 
+                       K_XY_only=False, check_numerics=_check_numerics):
+    return _mix_rq_kernel(X, Y, alphas=alphas, wts=wts, K_XY_only=K_XY_only, 
+                          check_numerics=check_numerics, add_dot=.1)
+
+def _mix_rq_001dot_kernel(X, Y, alphas=[.1, 1., 10.], wts=None, 
+                       K_XY_only=False, check_numerics=_check_numerics):
+    return _mix_rq_kernel(X, Y, alphas=alphas, wts=wts, K_XY_only=K_XY_only, 
+                          check_numerics=check_numerics, add_dot=.01)
+    
 def _tanh_mix_rq_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
     return _mix_rq_kernel(tf.tanh(X), tf.tanh(Y), K_XY_only=K_XY_only, 
                                check_numerics=check_numerics)  
