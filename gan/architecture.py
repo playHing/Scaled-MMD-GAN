@@ -8,7 +8,6 @@ Created on Wed Jan 10 14:34:47 2018
 import tensorflow as tf
 from ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from utils import conv_sizes, variable_summaries
-from mmd import _debug
 # Generators
 
 class Generator:
@@ -123,8 +122,6 @@ class Discriminator:
             
             layers = self.network(image, batch_size)
             
-            if _debug:
-                variable_summaries(layers)
             if return_layers:
                 return layers
             return layers['hF']
@@ -357,8 +354,6 @@ def get_networks(architecture):
 #            
 #            layers.update({'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF})
 #            
-#            if _debug:
-#                variable_summaries(layers)
 #            
 #            if return_layers:
 #                return layers

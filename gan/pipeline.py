@@ -240,10 +240,10 @@ def myhist(X, ax=plt, bins='auto', **kwargs):
 
 def get_pipeline(dataset, info):
     if 'lsun' in dataset:
-        if 'lmdb' in info:
-            return LMDB
-        else:
+        if 'tf_records' in info:
             return TfRecords
+        else:
+            return LMDB
     if dataset == 'celebA':        
         return JPEG 
     if dataset == 'mnist':

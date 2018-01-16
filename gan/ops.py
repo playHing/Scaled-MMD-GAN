@@ -3,47 +3,7 @@ import tensorflow as tf
 from tensorflow.python.framework import ops
 
 from utils import variable_summaries
-from mmd import _check_numerics, _eps
-
-
-#class batch_norm(object):
-#    """Code modification of http://stackoverflow.com/a/33950177"""
-#    def __init__(self, epsilon=1e-5, momentum = 0.9, name="batch_norm"):
-#        with tf.variable_scope(name):
-#            self.epsilon = epsilon
-#            self.momentum = momentum
-#
-#            self.ema = tf.train.ExponentialMovingAverage(decay=self.momentum)
-#            self.name = name
-#
-#    def __call__(self, x, train=True):
-#        shape = x.get_shape().as_list()
-#
-#        if train:
-#            with tf.variable_scope(self.name):
-#                self.beta = tf.get_variable("beta", [shape[-1]],
-#                                    initializer=tf.constant_initializer(0.))
-#                self.gamma = tf.get_variable("gamma", [shape[-1]],
-#                                    initializer=tf.constant_initializer(1.))
-#                                    #initializer=tf.random_normal_initializer(1., 0.02))
-#
-#                try:
-#                    batch_mean, batch_var = tf.nn.moments(x, [0, 1, 2], name='moments')
-#                except:
-#                    batch_mean, batch_var = tf.nn.moments(x, [0, 1], name='moments')
-#
-#                ema_apply_op = self.ema.apply([batch_mean, batch_var])
-#                self.ema_mean, self.ema_var = self.ema.average(batch_mean), self.ema.average(batch_var)
-#
-#                with tf.control_dependencies([ema_apply_op]):
-#                    mean, var = tf.identity(batch_mean), tf.identity(batch_var)
-#        else:
-#            mean, var = self.ema_mean, self.ema_var
-#
-#        normed = tf.nn.batch_norm_with_global_normalization(
-#                x, mean, var, self.beta, self.gamma, self.epsilon, scale_after_normalization=True)
-#
-#        return normed
+from mmd import _eps
 
 
 class batch_norm(object):
@@ -110,7 +70,7 @@ def conv2d(input_, output_dim,
 
 def deconv2d(input_, output_shape,
              k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.02,
-             name="deconv2d", with_w=False, check_numerics=_check_numerics):
+             name="deconv2d", with_w=False):
     with tf.variable_scope(name):
         scope_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, 
                                        tf.get_variable_scope().name)
@@ -118,8 +78,6 @@ def deconv2d(input_, output_shape,
         # filter : [height, width, output_channels, in_channels]
         w = tf.get_variable('w', [k_h, k_w, output_shape[-1], input_.get_shape()[-1]],
                             initializer=tf.random_normal_initializer(stddev=stddev))
-        if check_numerics:
-            w = tf.check_numerics(w, 'deconv_%s_w' % name)
 
         try:
             deconv = tf.nn.conv2d_transpose(input_, w, output_shape=output_shape,
@@ -132,10 +90,6 @@ def deconv2d(input_, output_shape,
 
         biases = tf.get_variable('biases', [output_shape[-1]], initializer=tf.constant_initializer(0.0))
         deconv = tf.reshape(tf.nn.bias_add(deconv, biases), deconv.get_shape())
-        
-        if _check_numerics:
-            biases = tf.check_numerics(biases, 'deconv_%s_biases' % name)
-            deconv = tf.check_numerics(deconv, 'deconv_%s_output' % name)
         
         if not has_summary:
             variable_summaries({'W': w, 'b': biases})

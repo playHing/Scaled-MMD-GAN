@@ -15,7 +15,6 @@ import load
 from ops import safer_norm
 import utils
 import pprint
-from mmd import _eps, _check_numerics, _debug
 from architecture import get_networks
 from scorer import Scorer
 import pipeline
@@ -41,7 +40,6 @@ class MMD_GAN(object):
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
         self.timer = utils.Timer()
-        self.check_numerics = _check_numerics
         self.dataset = config.dataset
         if config.architecture == 'dc128':
             output_size = 128
@@ -76,22 +74,17 @@ class MMD_GAN(object):
 
         self.c_dim = c_dim            
         
-        discriminator_desc = '_dc' if self.config.dc_discriminator else ''
-        d_clip = self.config.discriminator_weight_clip
-        dwc = ('_dwc_%f' % d_clip) if (d_clip > 0) else ''
+        discriminator_desc = '_dc'
         if self.config.learning_rate_D == self.config.learning_rate:
             lr = 'lr%.8f' % self.config.learning_rate
         else:
             lr = 'lr%.8fG%fD' % (self.config.learning_rate, self.config.learning_rate_D)
         arch = '%dx%d' % (self.config.gf_dim, self.config.df_dim)
         
-        kernel_name = self.config.kernel
-        if self.config.d_kernel != "":
-            kernel_name += '-D' + self.config.d_kernel
-        self.description = ("%s%s_%s%s_%s%sd%d-%d-%d_%s_%s_%s" % (
+        self.description = ("%s%s_%s%s_%sd%d-%d-%d_%s_%s_%s" % (
                     self.dataset, arch,
                     self.config.architecture, discriminator_desc,
-                    kernel_name, dwc, self.config.dsteps,
+                    self.config.kernel, self.config.dsteps,
                     self.config.start_dsteps, self.config.gsteps, self.batch_size,
                     self.output_size, lr))
         
@@ -114,12 +107,9 @@ class MMD_GAN(object):
         
         self.initialized_for_sampling = config.is_train
 
-    def _ensure_dirs(self, folders=['samples', 'logs', 'checkpoint']):
+    def _ensure_dirs(self, folders=['sample', 'log', 'checkpoint']):
         if type(folders) == str:
             folders = [folders]
-        if self.config.gradient_penalty > 0:
-            if not self.config.gp_type in self.config.suffix:
-                self.config.suffix = '_' + self.config.gp_type + self.config.suffix
         for folder in folders:
             ff = folder + '_dir'
             if not os.path.exists(ff):
@@ -153,32 +143,20 @@ class MMD_GAN(object):
 
         Generator, Discriminator = get_networks(self.config.architecture)
         generator = Generator(self.gf_dim, self.c_dim, self.output_size, self.config.batch_norm)
-        self.discriminator = Discriminator(self.df_dim, self.dof_dim, self.config.batch_norm & (self.config.gradient_penalty <= 0))
+        dbn = self.config.batch_norm & (self.config.gradient_penalty <= 0)
+        self.discriminator = Discriminator(self.df_dim, self.dof_dim, dbn)
         # tf.summary.histogram("z", self.z)
 
         self.G = generator(self.z, self.batch_size)
 
-        
-        if self.check_numerics:
-            self.G = tf.check_numerics(self.G, 'self.G')
         self.sampler = generator(self.sample_z, self.sample_size)
         
-        if self.config.dc_discriminator:
-            self.d_images_layers = self.discriminator(self.images, 
-                self.real_batch_size, return_layers=True)
-            self.d_G_layers = self.discriminator(self.G, self.batch_size,
-                                                 return_layers=True)
-            self.d_images = self.d_images_layers['hF']
-            self.d_G = self.d_G_layers['hF']
-        else:
-            self.d_images = tf.reshape(self.images, [self.real_batch_size, -1])
-            self.d_G = tf.reshape(self.G, [self.batch_size, -1])
-        
-        if _debug:
-            utils.variable_summaries({'Dreal': self.d_images, 'Dfake': self.d_G})
-            tf.summary.scalar('norm_Dfake', tf.norm(self.d_G))
-            tf.summary.scalar('nomr_Dreal', tf.norm(self.d_images))
-            tf.summary.scalar('norm_diff_Dreal_Dfake', tf.norm(self.d_G - self.d_images))
+        self.d_images_layers = self.discriminator(self.images, 
+            self.real_batch_size, return_layers=True)
+        self.d_G_layers = self.discriminator(self.G, self.batch_size,
+                                             return_layers=True)
+        self.d_images = self.d_images_layers['hF']
+        self.d_G = self.d_G_layers['hF']
             
         if self.config.is_train:
             self.set_loss(self.d_G, self.d_images)
@@ -195,42 +173,21 @@ class MMD_GAN(object):
         self.g_vars = [var for var in t_vars if 'g_' in var.name]
 
         self.saver = tf.train.Saver(max_to_keep=2)
-
-        if 'distance' in self.config.Loss_variance:
-            self.Loss_variance = utils.Loss_variance(
-                self.sess, self.dof_dim, 
-                lambda x, bs: self.discriminator(x, bs),
-                kernel_name='distance'
-            )
             
         print('[*] Model built.')
 
     def set_loss(self, G, images):
-        if self.check_numerics:
-            G = tf.check_numerics(G, 'G')
-            images = tf.check_numerics(images, 'images')
-
         kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
         kerGI = kernel(G, images)
-        
-        if _debug:
-            utils.variable_summaries({'K_XX': kerGI[0], 'K_XY': kerGI[1], 'K_YY': kerGI[2]})
             
         with tf.variable_scope('loss'):
-            if self.config.model in ['mmd', 'mmd_gan']:
-                self.g_loss = MMD.mmd2(kerGI)
-                if self.config.d_kernel != '':
-                    DkerGI = getattr(MMD, '_%s_kernel' % self.config.d_kernel)(G, images)
-                    self.d_loss = -MMD.mmd2(DkerGI)
-                else:
-                    self.d_loss = -self.g_loss 
-                self.optim_name = 'kernel_loss'
-            elif self.config.model == 'tmmd':
-                kl, rl, var_est = MMD.mmd2_and_ratio(kerGI)
-                self.g_loss = rl
-                self.optim_name = 'ratio_loss'
-                tf.summary.scalar("kernel_loss", kl)#tf.sqrt(kl + _eps))
-                tf.summary.scalar("variance_estimate", var_est)
+            self.g_loss = MMD.mmd2(kerGI)
+            if self.config.d_kernel != '':
+                DkerGI = getattr(MMD, '_%s_kernel' % self.config.d_kernel)(G, images)
+                self.d_loss = -MMD.mmd2(DkerGI)
+            else:
+                self.d_loss = -self.g_loss 
+            self.optim_name = 'kernel_loss'
             
         self.add_gradient_penalty(kernel, G, images)
         self.add_l2_penalty()
@@ -245,59 +202,21 @@ class MMD_GAN(object):
             alpha = tf.constant(np.random.rand(bs), dtype=tf.float32, name='const_alpha')
         else:
             alpha = tf.random_uniform(shape=[bs])
-        if 'mid' in self.config.suffix:
-            alpha = .4 + .2 * alpha
-        elif 'edges' in self.config.suffix:
-            qq = tf.cast(tf.reshape(tf.multinomial([[.5, .5]], bs),
-                                    [bs]), tf.float32)
-            alpha = .1 * alpha * qq + (1. - .1 * alpha) * (1. - qq)
-        elif 'edge' in self.config.suffix:
-            alpha = .95 + .05 * alpha
 
-        if self.config.gp_type == 'feature_space':
-            alpha = tf.reshape(alpha, [bs, 1])
-            x_hat = (1. - alpha) * real + alpha * fake
-            Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
-            witness = Ekx(real) - Ekx(fake)
-            gradients = tf.gradients(witness, [x_hat])[0]
-        elif self.config.gp_type == 'data_space':
-            alpha = tf.reshape(alpha, [bs, 1, 1, 1])
-            real_data = self.images[:bs] #before discirminator
-            fake_data = self.G[:bs] #before discriminator
-            x_hat_data = (1. - alpha) * real_data + alpha * fake_data
-            if self.check_numerics:
-                x_hat_data = tf.check_numerics(x_hat_data, 'x_hat_data')
-            x_hat = self.discriminator(x_hat_data, bs)
-            if self.check_numerics:
-                x_hat = tf.check_numerics(x_hat, 'x_hat')
-            Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
-            Ekxr, Ekxf = Ekx(real), Ekx(fake)
-            witness = Ekxr - Ekxf
-            if self.check_numerics:
-                witness = tf.check_numerics(witness, 'witness')
-            gradients = tf.gradients(witness, [x_hat_data])[0]
-            if self.check_numerics:
-                gradients = tf.check_numerics(gradients, 'gradients 0')
-            if _debug:
-                tf.summary.scalar('norm_witness_mid', tf.norm(witness))
-                tf.summary.scalar('norm_Ekx_real', tf.norm(Ekxr))
-                tf.summary.scalar('norm_Ekx_fake', tf.norm(Ekxf))
-        elif self.config.gp_type == 'wgan':
-            alpha = tf.reshape(alpha, [bs, 1, 1, 1])
-            real_data = self.images #before discirminator
-            fake_data = self.G #before discriminator
-            x_hat_data = (1. - alpha) * real_data + alpha * fake_data
-            x_hat = self.discriminator(x_hat_data, bs)
-            gradients = tf.gradients(x_hat, [x_hat_data])[0]
+        alpha = tf.reshape(alpha, [bs, 1, 1, 1])
+        real_data = self.images[:bs] # discirminator input level
+        fake_data = self.G[:bs] # discriminator input level
+        x_hat_data = (1. - alpha) * real_data + alpha * fake_data
+        x_hat = self.discriminator(x_hat_data, bs)
+        Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
+        Ekxr, Ekxf = Ekx(real), Ekx(fake)
+        witness = Ekxr - Ekxf
+        gradients = tf.gradients(witness, [x_hat_data])[0]
         
-        if self.check_numerics:  
-            penalty = tf.check_numerics(tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0)), 'penalty')
-        else:
-            penalty = tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0))#
+        penalty = tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0))
 
         with tf.variable_scope('loss'):
             if self.config.gradient_penalty > 0:
-#                self.g_loss = self.mmd_loss
                 self.d_loss += penalty * self.gp
                 self.optim_name += ' (gp %.1f)' % self.config.gradient_penalty
                 tf.summary.scalar('dx_penalty', penalty)
@@ -321,36 +240,29 @@ class MMD_GAN(object):
         
     def set_grads(self):
         with tf.variable_scope("G_grads"):
-            self.g_kernel_optim = tf.train.AdamOptimizer(self.lr, beta1=0.5, beta2=0.9)
-            self.g_gvs = self.g_kernel_optim.compute_gradients(
+            self.g_optim = tf.train.AdamOptimizer(self.lr, beta1=self.config.beta1, beta2=0.9)
+            self.g_gvs = self.g_optim.compute_gradients(
                 loss=self.g_loss,
                 var_list=self.g_vars
             )       
             self.g_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.g_gvs]
-            self.g_grads = self.g_kernel_optim.apply_gradients(
+            self.g_grads = self.g_optim.apply_gradients(
                 self.g_gvs, 
                 global_step=self.global_step
             ) # minimizes self.g_loss <==> minimizes MMD
-        if self.config.dc_discriminator or ('optme' in self.config.model):
-            with tf.variable_scope("D_grads"):
-                self.d_kernel_optim = tf.train.AdamOptimizer(
-                    self.lr * self.config.learning_rate_D / self.config.learning_rate, 
-                    beta1=0.5, beta2=0.9
-                )
-                self.d_gvs = self.d_kernel_optim.compute_gradients(
-                    loss=self.d_loss, 
-                    var_list=self.d_vars
-                )
-                # negative gradients not needed - by definition d_loss = -optim_loss
-#                if self.config.gradient_penalty == 0: 
-                self.d_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
-                self.d_grads = self.d_kernel_optim.apply_gradients(self.d_gvs) # minimizes self.d_loss <==> max MMD
-                dclip = self.config.discriminator_weight_clip
-                if dclip > 0:
-                    self.d_vars = [tf.clip_by_value(d_var, -dclip, dclip) 
-                                       for d_var in self.d_vars]
-        else:
-            self.d_grads = None      
+
+        with tf.variable_scope("D_grads"):
+            self.d_optim = tf.train.AdamOptimizer(
+                self.lr * self.config.learning_rate_D / self.config.learning_rate, 
+                beta1=self.config.beta1, beta2=0.9
+            )
+            self.d_gvs = self.d_optim.compute_gradients(
+                loss=self.d_loss, 
+                var_list=self.d_vars
+            )
+            # negative gradients not needed - by definition d_loss = -optim_loss
+            self.d_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
+            self.d_grads = self.d_optim.apply_gradients(self.d_gvs) # minimizes self.d_loss <==> max MMD    
         print('[*] Gradients set')
     
     def train_step(self, batch_images=None):
@@ -399,9 +311,6 @@ class MMD_GAN(object):
                 self.timer(step, "%s, G: %.8f, D: %.8f" % (self.optim_name, g_loss, d_loss))
                 if self.config.L2_discriminator_penalty > 0:
                     print(' ' * 22 + ('Discriminator L2 penalty: %.8f' % self.sess.run(self.d_L2_penalty)))
-                if _debug:
-                    print('discriminator output, real[0:3] ', self.sess.run(self.d_images)[:3])
-                    print('discriminator output, fake[0:3] ', self.sess.run(self.d_images)[:3])
             if np.mod(step + 1, self.config.max_iteration//5) == 0:
                 if not self.config.MMD_lr_scheduler:
 #                    self.lr *= self.config.decay_rate

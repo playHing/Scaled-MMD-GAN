@@ -17,7 +17,7 @@ flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
 flags.DEFINE_float("init", 0.02, "Initialization value [0.02]")
 flags.DEFINE_integer("train_size", np.inf, "The size of train images [np.inf]")
 flags.DEFINE_integer("batch_size", 128, "The size of batch images [1000]")
-flags.DEFINE_integer("real_batch_size", -1, "The size of batch images for real samples [1000]")
+flags.DEFINE_integer("real_batch_size", -1, "The size of batch images for real samples. If -1 then same as batch_size [-1]")
 flags.DEFINE_integer("output_size", 32, "The size of the output images to produce [64]")
 flags.DEFINE_integer("c_dim", 3, "Dimension of image color. [3]")
 flags.DEFINE_string("dataset", "cifar10", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
@@ -28,14 +28,12 @@ flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image sam
 flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
 flags.DEFINE_string("architecture", "dc", "The name of the architecture [dc, mlp, dfc]")
 flags.DEFINE_string("kernel", "", "The name of the architecture ['', 'mix_rbf', 'mix_rq', 'distance', 'dot']")
-flags.DEFINE_string("d_kernel", "", "The name of the architecture ['', 'mix_rbf', 'mix_rq', 'distance', 'dot']")
 flags.DEFINE_string("model", "mmd", "The name of the kernel loss model [mmd, tmmd, me]")
 flags.DEFINE_boolean("dc_discriminator", False, "use deep convolutional discriminator [True]")
 flags.DEFINE_boolean("is_train", False, "True for training, False for testing [False]")
 flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothing [False]")
 flags.DEFINE_boolean("is_demo", False, "For testing [False]")
 flags.DEFINE_float("gradient_penalty", 0.0, "Use gradient penalty [0.0]")
-flags.DEFINE_float("discriminator_weight_clip", 0.0, "Use discriminator weight clip [0.0]")
 flags.DEFINE_integer("threads", np.inf, "Upper limit for number of threads [np.inf]")
 flags.DEFINE_integer("dsteps", 1, "Number of discriminator steps in a row [1] ")
 flags.DEFINE_integer("gsteps", 1, "Number of generator steps in a row [1] ")
@@ -46,24 +44,18 @@ flags.DEFINE_integer("gf_dim", 64, "no of generator channels [64]")
 flags.DEFINE_boolean("batch_norm", False, "Use of batch norm [False] (always False for discriminator if gradient_penalty > 0)")
 flags.DEFINE_integer("test_locations", 16, "No of test locations for mean-embedding model [16] ")
 flags.DEFINE_boolean("log", True, "Wheather to write log to a file in samples directory [True]")
-flags.DEFINE_string("suffix", '', "Additional settings ['']")
-flags.DEFINE_string("gp_type", 'data_space', "type of gradient penalty ['data_space', 'feature_space', 'wgan']")
-flags.DEFINE_string("single_batch_experiment", False, "wheater to train on a constant single batch with constant gp evaluation points")
+flags.DEFINE_string("suffix", '', "Additional settings ['', '_lmdb']")
 flags.DEFINE_boolean('compute_scores', False, "Compute scores")
 flags.DEFINE_float("gpu_mem", .9, "GPU memory fraction limit [1.0]")
 flags.DEFINE_float("L2_discriminator_penalty", 0.0, "L2 penalty on discriminator features [0.0]")
 flags.DEFINE_string("Loss_variance", "", "which loss variance to monitor")
 flags.DEFINE_integer("no_of_samples", 100000, "number of samples to produce")
 flags.DEFINE_boolean("print_pca", False, "")
-flags.DEFINE_integer("save_layer_outputs", 0, "")
+flags.DEFINE_integer("save_layer_outputs", 0, "Wheather to save_layer_outputs. If == 2, saves outputs at exponential steps: 1, 2, 4, ..., 512 and every 1000. [0, 1, 2]")
 flags.DEFINE_integer("witness_update_frequency", 100, "")
 FLAGS = flags.FLAGS
 
 def main(_):
-    if FLAGS.architecture not in ['dfc', 'dcold']:
-        if FLAGS.dof_dim > 0:
-            FLAGS.architecture += '.' + str(FLAGS.dof_dim)
-
     pp.pprint(FLAGS.__flags)
         
     if FLAGS.threads < np.inf:
@@ -72,67 +64,40 @@ def main(_):
         
     else:
         sess_config = tf.ConfigProto()
-    if FLAGS.model in ['mmd_gan']:
-        from model_mmd_gan import MMDCE_GAN as model
-    elif FLAGS.model in ['tmmd', 'mmd']:
+    if 'mmd' in FLAGS.model:
         from model_mmd2 import MMD_GAN as model
-    elif (FLAGS.model == 'me') or ('optme' in FLAGS.model):
-        from model_me2 import ME_GAN as model
-    elif FLAGS.model == 'me_brb':
-        from model_me_brb import MEbrb_GAN as model
-    elif FLAGS.model == 'gan':
-        from model_gan import GAN as model
     elif FLAGS.model == 'wgan_gp':
-        from model_wgan_gp import GAN as model
-    elif FLAGS.model == 'stream_mmd':
-        from stream_mmd import Stream_MMD_GAN as model
-    elif FLAGS.model == 'fix_witness':
-        from fix_witness import FixWitness as model
+        from model_wgan_gp import WGAN_GP as model
     elif 'cramer' in FLAGS.model:
         from cramer import Cramer_GAN as model
 
         
     with tf.Session(config=sess_config) as sess:
         if FLAGS.dataset == 'mnist':
-            dcgan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
-                          data_dir=FLAGS.data_dir)
+            gan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
+                        data_dir=FLAGS.data_dir)
         elif FLAGS.dataset == 'cifar10':
-            dcgan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
-                          data_dir=FLAGS.data_dir)
-        elif ('lsun' in FLAGS.dataset) or (FLAGS.dataset == 'celebA'):
-            dcgan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=FLAGS.output_size, c_dim=3,
-                          data_dir=FLAGS.data_dir)
-        elif FLAGS.dataset == 'GaussianMix':
-            dcgan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=1, c_dim=1, z_dim=5,
-                          data_dir=FLAGS.data_dir)
+            gan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
+                        data_dir=FLAGS.data_dir)
+        elif FLAGS.dataset in  ['celebA', 'lsun']:
+            gan = model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=FLAGS.output_size, c_dim=3,
+                        data_dir=FLAGS.data_dir)
         else:
-            dcgan = model(sess, batch_size=FLAGS.batch_size, 
-                          output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
-                          data_dir=FLAGS.data_dir)
+            gan = model(sess, batch_size=FLAGS.batch_size, 
+                        output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
+                        data_dir=FLAGS.data_dir)
             
         if FLAGS.is_train:
-            dcgan.train()
+            gan.train()
         elif FLAGS.print_pca:
-            dcgan.print_pca()
+            gan.print_pca()
         else:
-            dcgan.get_samples(FLAGS.no_of_samples, layers=[-1])
-        
-
-        if FLAGS.visualize:
-            to_json("./web/js/layers.js", [dcgan.h0_w, dcgan.h0_b, dcgan.g_bn0],
-                                          [dcgan.h1_w, dcgan.h1_b, dcgan.g_bn1],
-                                          [dcgan.h2_w, dcgan.h2_b, dcgan.g_bn2],
-                                          [dcgan.h3_w, dcgan.h3_b, dcgan.g_bn3],
-                                          [dcgan.h4_w, dcgan.h4_b, None])
-
-            # Below is codes for visualization
-            OPTION = 2
-            visualize(sess, dcgan, FLAGS, OPTION)
+            gan.get_samples(FLAGS.no_of_samples, layers=[-1])
 
         if FLAGS.log:
-            sys.stdout = dcgan.old_stdout
-            dcgan.log_file.close()
-        dcgan.sess.close()
+            sys.stdout = gan.old_stdout
+            gan.log_file.close()
+        gan.sess.close()
         
 if __name__ == '__main__':
     tf.app.run()
