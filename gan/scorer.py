@@ -61,12 +61,12 @@ class Scorer(object):
         if self.dataset == 'mnist': #LeNet model takes [-.5, .5] pics
             images4score -= .5
             if (images4score.max() > .5) or (images4score.min() < -.5):
-                print('WARNING! LeNet min/max violated: min, max = ', images4score.min(), images4score.max())
+                print('WARNING! LeNet min/max violated: min = %f, max = %f. Clipping values.' % (images4score.min(), images4score.max()))
                 images4score = images4score.clip(-.5, .5)
         else: #Inception model takes [0 , 255] pics
             images4score *= 255.0
             if (images4score.max() > 255.) or (images4score.min() < .0):
-                print('WARNING! Inception min/max violated: min, max = ', images4score.min(), images4score.max())
+                print('WARNING! Inception min/max violated: min = %f, max = %f. Clipping values.' % (images4score.min(), images4score.max()))
                 images4score = images4score.clip(0., 255.)
                 
         preds, codes = cs.featurize(images4score, self.model,
@@ -90,7 +90,7 @@ class Scorer(object):
         if len(self.output) > 0:
             if np.min([sc['mmd2'].mean() for sc in self.output]) > output['mmd2'].mean():
                 print('Saving BEST model (so far)')
-                gan.save(gan.checkpoint_dir, None)
+                gan.save_checkpoint()
         self.output.append(output)
                 
         
