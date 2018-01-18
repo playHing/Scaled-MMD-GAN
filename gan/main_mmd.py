@@ -64,9 +64,9 @@ def main(_):
     else:
         sess_config = tf.ConfigProto()
     if 'mmd' in FLAGS.model:
-        from model_mmd2 import MMD_GAN as model
+        from model_mmd import MMD_GAN as model
     elif FLAGS.model == 'wgan_gp':
-        from model_wgan_gp import WGAN_GP as model
+        from wgan_gp import WGAN_GP as model
     elif 'cramer' in FLAGS.model:
         from cramer import Cramer_GAN as model
 
@@ -92,16 +92,7 @@ def main(_):
             gan.print_pca()
         elif FLAGS.visualize:
             gan.load_checkpoint()
-            dcgan = gan
-            to_json("./web/js/layers.js", [dcgan.h0_w, dcgan.h0_b, dcgan.g_bn0],
-                                          [dcgan.h1_w, dcgan.h1_b, dcgan.g_bn1],
-                                          [dcgan.h2_w, dcgan.h2_b, dcgan.g_bn2],
-                                          [dcgan.h3_w, dcgan.h3_b, dcgan.g_bn3],
-                                          [dcgan.h4_w, dcgan.h4_b, None])
-
-            # Below is codes for visualization
-            OPTION = 2
-            visualize(sess, dcgan, FLAGS, OPTION)
+            visualize(sess, gan, FLAGS, 2)
         else:
             gan.load_and_sample(FLAGS.no_of_samples, layers=[-1])
 

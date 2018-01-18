@@ -2,7 +2,6 @@
 /logs_*
 /samples_*
 /official_samples
-/model_mmd.py
 /*.pyc
 /*.ipynb
 /run*.sh
@@ -13,4 +12,4 @@
 stream_mmd.py
 test.py
 download.py
-
+model_me*
