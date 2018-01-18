@@ -20,7 +20,7 @@ flags.DEFINE_integer("batch_size", 128, "The size of batch images [1000]")
 flags.DEFINE_integer("real_batch_size", -1, "The size of batch images for real samples. If -1 then same as batch_size [-1]")
 flags.DEFINE_integer("output_size", 32, "The size of the output images to produce [64]")
 flags.DEFINE_integer("c_dim", 3, "Dimension of image color. [3]")
-flags.DEFINE_string("dataset", "cifar10", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
+flags.DEFINE_string("dataset", "cifar10", "The name of dataset [celebA, mnist, lsun, cifar10]")
 flags.DEFINE_string("name", "mmd_test", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
 flags.DEFINE_string("checkpoint_dir", "checkpoint_mmd", "Directory name to save the checkpoints [checkpoint_mmd]")
 flags.DEFINE_string("sample_dir", "samples_mmd", "Directory name to save the image samples [samples_mmd]")
@@ -48,7 +48,6 @@ flags.DEFINE_string("suffix", '', "Additional settings ['', '_lmdb']")
 flags.DEFINE_boolean('compute_scores', False, "Compute scores")
 flags.DEFINE_float("gpu_mem", .9, "GPU memory fraction limit [1.0]")
 flags.DEFINE_float("L2_discriminator_penalty", 0.0, "L2 penalty on discriminator features [0.0]")
-flags.DEFINE_string("Loss_variance", "", "which loss variance to monitor")
 flags.DEFINE_integer("no_of_samples", 100000, "number of samples to produce")
 flags.DEFINE_boolean("print_pca", False, "")
 flags.DEFINE_integer("save_layer_outputs", 0, "Wheather to save_layer_outputs. If == 2, saves outputs at exponential steps: 1, 2, 4, ..., 512 and every 1000. [0, 1, 2]")
@@ -91,8 +90,21 @@ def main(_):
             gan.train()
         elif FLAGS.print_pca:
             gan.print_pca()
+        elif FLAGS.visualize:
+            gan.load_checkpoint()
+            dcgan = gan
+            to_json("./web/js/layers.js", [dcgan.h0_w, dcgan.h0_b, dcgan.g_bn0],
+                                          [dcgan.h1_w, dcgan.h1_b, dcgan.g_bn1],
+                                          [dcgan.h2_w, dcgan.h2_b, dcgan.g_bn2],
+                                          [dcgan.h3_w, dcgan.h3_b, dcgan.g_bn3],
+                                          [dcgan.h4_w, dcgan.h4_b, None])
+
+            # Below is codes for visualization
+            OPTION = 2
+            visualize(sess, dcgan, FLAGS, OPTION)
         else:
-            gan.get_samples(FLAGS.no_of_samples, layers=[-1])
+            gan.load_and_sample(FLAGS.no_of_samples, layers=[-1])
+
 
         if FLAGS.log:
             sys.stdout = gan.old_stdout

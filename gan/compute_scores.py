@@ -1,6 +1,3 @@
-#!/usr/bin/env python
-# Code partially based on openai/improved-gan:
-#   https://github.com/openai/improved-gan/blob/master/inception_score/model.py
 from __future__ import division, print_function
 
 import os.path
@@ -79,18 +76,9 @@ class LeNet(object):
 
         self.sess = sess = tf.Session()
 
-        #with sess:
         tf.saved_model.loader.load(
             sess, [tf.saved_model.tag_constants.TRAINING], MODEL_DIR)
         g = sess.graph
-
-        # this doesn't work
-        # for op in g.get_operations():
-        #     for o in op.outputs:
-        #         shape = [s.value for s in o.get_shape()]
-        #         if len(shape) and shape[0] == 64:
-        #             shape[0] = None
-        #         o._shape = tf.TensorShape(shape)
 
         self.softmax = g.get_tensor_by_name('Softmax_1:0')
         self.coder = g.get_tensor_by_name('Relu_5:0')
@@ -110,14 +98,14 @@ def featurize(images, model, batch_size=100, transformer=np.asarray,
     assert(sub.ndim == 4)
     if isinstance(model, Inception):
         assert sub.shape[3] == 3
-#        if (sub.max() > 255) or (sub.min() < 0):
-        print('WARNING! sub min, max = ', sub.min(), sub.max())
-        sub = sub.clip(0., 255.)
+        if (sub.max() > 255) or (sub.min() < 0):
+            print('WARNING! Inception min/max violated: min = %f, max = %f. Clipping values.' % (sub.min(), sub.max()))
+            sub = sub.clip(0., 255.)
     elif isinstance(model, LeNet):
         batch_size = 64
         assert sub.shape[3] == 1
         if (sub.max() > .5) or (sub.min() < -.5):
-            print('WARNING! sub min, max = ', sub.min(), sub.max())
+            print('WARNING! LeNet min/max violated: min = %f, max = %f. Clipping values.' % (sub.min(), sub.max()))
             sub = sub.clip(-.5, .5)
 
     n = len(images)

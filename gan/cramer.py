@@ -1,12 +1,5 @@
-import mmd as MMD
-from mmd import _eps
-
 from model_mmd2 import MMD_GAN, tf, np
-from model_me_brb import MEbrb_GAN
-from utils import variable_summaries, safer_norm
-from cholesky import me_loss
-from ops import batch_norm, conv2d, deconv2d, linear, lrelu
-from glob import glob
+from utils import safer_norm
 from architecture import get_networks
 
 class Cramer_GAN(MMD_GAN):                   
@@ -24,7 +17,8 @@ class Cramer_GAN(MMD_GAN):
 
         Generator, Discriminator = get_networks(self.config.architecture)
         generator = Generator(self.gf_dim, self.c_dim, self.output_size, self.config.batch_norm)
-        self.discriminator = Discriminator(self.df_dim, self.dof_dim, self.config.batch_norm & (self.config.gradient_penalty <= 0))
+        dbn = self.config.batch_norm & (self.config.gradient_penalty <= 0)
+        self.discriminator = Discriminator(self.df_dim, self.dof_dim, dbn)
 
 
         self.G = generator(tf.random_uniform([self.batch_size, self.z_dim], minval=-1.,
@@ -53,11 +47,6 @@ class Cramer_GAN(MMD_GAN):
 
         self.d_vars = [var for var in t_vars if 'd_' in var.name]
         self.g_vars = [var for var in t_vars if 'g_' in var.name]
-
-        if 'distance' in self.config.Loss_variance:
-            self.Loss_variance = Loss_variance(self.sess, self.dof_dim, 
-                                               lambda x, bs: self.discriminator(x, bs),
-                                               kernel_name='distance')
 
         self.saver = tf.train.Saver(max_to_keep=2)
         
