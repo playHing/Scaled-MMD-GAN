@@ -8,7 +8,7 @@ Created on Thu Jan 11 14:11:46 2018
 import os, time, lmdb, io
 import numpy as np
 import tensorflow as tf
-import utils
+from utils import misc
 from PIL import Image
 from glob import glob
 import matplotlib.pyplot as plt
@@ -78,7 +78,7 @@ class LMDB(Pipeline):
                     byte_im.seek(0)
                     try:
                         im = Image.open(byte_im)
-                        ims.append(utils.center_and_scale(im, size=self.output_size))
+                        ims.append(misc.center_and_scale(im, size=self.output_size))
                     except Exception as e:
                         print(e)
                     if not cursor.next():
@@ -170,14 +170,14 @@ class Cifar10(Pipeline):
         categories = np.arange(10)
         batchesX, batchesY = [], []
         for batch in range(1,6):
-            loaded = utils.unpickle(os.path.join(self.data_dir, 'data_batch_%d' % batch))
+            loaded = misc.unpickle(os.path.join(self.data_dir, 'data_batch_%d' % batch))
             idx = np.in1d(np.array(loaded['labels']), categories)
             batchesX.append(loaded['data'][idx].reshape(idx.sum(), 3, 32, 32))
             batchesY.append(np.array(loaded['labels'])[idx])
         trX = np.concatenate(batchesX, axis=0).transpose(0, 2, 3, 1)
         trY = np.concatenate(batchesY, axis=0)
         
-        test = utils.unpickle(os.path.join(self.data_dir, 'test_batch'))
+        test = misc.unpickle(os.path.join(self.data_dir, 'test_batch'))
         idx = np.in1d(np.array(test['labels']), categories)
         teX = test['data'][idx].reshape(idx.sum(), 3, 32, 32).transpose(0, 2, 3, 1)
         teY = np.array(test['labels'])[idx]

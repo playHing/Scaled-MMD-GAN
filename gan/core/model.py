@@ -1,7 +1,7 @@
 from __future__ import division, print_function
-import os, sys, time, pprint
-from .mmd import mmd2, np, tf
-from .ops import safer_norm
+import os, sys, time, pprint, numpy as np
+from . import  mmd
+from .ops import safer_norm, tf
 from .architecture import get_networks
 from .pipeline import get_pipeline
 from utils import timer, scorer, misc 
@@ -32,9 +32,6 @@ class MMD_GAN(object):
             config.architecture = 'dc128'
         if config.architecture in ['dc64', 'dcgan64']:
             output_size = 64
-            
-        if config.compute_scores:
-            self.scorer = scorer.Scorer(self.dataset, config.MMD_lr_scheduler)
             
         self.sess = sess
         if config.real_batch_size == -1:
@@ -162,16 +159,12 @@ class MMD_GAN(object):
 
 
     def set_loss(self, G, images):
-        kernel = getattr(MMD, '_%s_kernel' % self.config.kernel)
+        kernel = getattr(mmd, '_%s_kernel' % self.config.kernel)
         kerGI = kernel(G, images)
             
         with tf.variable_scope('loss'):
-            self.g_loss = mmd2(kerGI)
-            if self.config.d_kernel != '':
-                DkerGI = getattr(MMD, '_%s_kernel' % self.config.d_kernel)(G, images)
-                self.d_loss = -mmd2(DkerGI)
-            else:
-                self.d_loss = -self.g_loss 
+            self.g_loss = mmd.mmd2(kerGI)
+            self.d_loss = -self.g_loss 
             self.optim_name = 'kernel_loss'
             
         self.add_gradient_penalty(kernel, G, images)
@@ -184,12 +177,7 @@ class MMD_GAN(object):
         bs = min([self.batch_size, self.real_batch_size])
         real, fake = real[:bs], fake[:bs]
         
-        if self.config.single_batch_experiment:
-            alpha = tf.constant(np.random.rand(bs), dtype=tf.float32, name='const_alpha')
-        else:
-            alpha = tf.random_uniform(shape=[bs])
-
-        alpha = tf.reshape(alpha, [bs, 1, 1, 1])
+        alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
         real_data = self.images[:bs] # discirminator input level
         fake_data = self.G[:bs] # discriminator input level
         x_hat_data = (1. - alpha) * real_data + alpha * fake_data
@@ -442,7 +430,7 @@ class MMD_GAN(object):
         return values
         
     
-    def load_and_sample(self, n=None, save=True, layers=[]):
+    def get_samples(self, n=None, save=True, layers=[]):
         if not (self.initialized_for_sampling or self.config.is_train):
             print('[*] Loading from ' + self.checkpoint_dir + '...')
             self.sess.run(tf.local_variables_initializer())
