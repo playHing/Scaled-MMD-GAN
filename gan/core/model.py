@@ -4,9 +4,7 @@ from .mmd import mmd2, np, tf
 from .ops import safer_norm
 from .architecture import get_networks
 from .pipeline import get_pipeline
-import utils
-
-#from compute_scores import *
+from utils import timer, scorer, misc 
 
 class MMD_GAN(object):
     def __init__(self, sess, config, 
@@ -26,7 +24,7 @@ class MMD_GAN(object):
             dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
-        self.timer = utils.timer.Timer()
+        self.timer = timer.Timer()
         self.dataset = config.dataset
         if config.architecture == 'dc128':
             output_size = 128
@@ -36,7 +34,7 @@ class MMD_GAN(object):
             output_size = 64
             
         if config.compute_scores:
-            self.scorer = utils.scorer.Scorer(self.dataset, config.MMD_lr_scheduler)
+            self.scorer = scorer.Scorer(self.dataset, config.MMD_lr_scheduler)
             
         self.sess = sess
         if config.real_batch_size == -1:
@@ -82,11 +80,11 @@ class MMD_GAN(object):
             self.log_file = open(os.path.join(self.sample_dir, 'log.txt'), 'w', buffering=1)
             print('Execution start time: %s' % time.ctime())
             print('Log file: %s' % self.log_file)
-            stdout = self.logfile
+            stdout = self.log_file
             sys.stdout = self.log_file
             sys.stderr = self.log_file
         if config.compute_scores:
-            self.scorer = utils.scorer.Scorer(self.dataset, config.MMD_lr_scheduler, stdout=stdout)
+            self.scorer = scorer.Scorer(self.dataset, config.MMD_lr_scheduler, stdout=stdout)
         print('Execution start time: %s' % time.ctime())
         pprint.PrettyPrinter().pprint(self.config.__dict__['__flags'])
         self.build_model()
@@ -400,7 +398,7 @@ class MMD_GAN(object):
             samples = self.sess.run(self.sampler)
             self._ensure_dirs('sample')
             p = os.path.join(self.sample_dir, 'train_{:02d}.png'.format(step))
-            utils.utils.save_images(samples[:64, :, :, :], [8, 8], p)  
+            misc.save_images(samples[:64, :, :, :], [8, 8], p)  
             
             
     def save_layers(self, step, freq=1000, n=256, layers=[-1, -2]):
