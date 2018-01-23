@@ -14,6 +14,7 @@ class Scorer(object):
     def __init__(self, dataset, lr_scheduler=True, stdout=sys.stdout):
         sys.stdout = stdout
         sys.stderr = stdout
+        self.stdout = stdout
         self.dataset = dataset
         if dataset == 'mnist':
             self.model = cs.LeNet()
@@ -79,6 +80,7 @@ class Scorer(object):
         gan.timer(step, "Inception mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
         
         output['fid'] = scores = cs.fid_score(codes, self.train_codes, 
+                                              out=self.stdout,
                                               split_method='bootstrap',
                                               splits=3)
         gan.timer(step, "FID mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))

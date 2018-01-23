@@ -178,7 +178,7 @@ def inception_score(preds, **split_args):
     return scores
 
 
-def fid_score(codes_g, codes_r, eps=1e-6, **split_args):
+def fid_score(codes_g, codes_r, eps=1e-6, out=sys.stdout, **split_args):
     splits_g = get_splits(codes_g.shape[0], **split_args)
     splits_r = get_splits(codes_r.shape[0], **split_args)
     assert len(splits_g) == len(splits_r)
@@ -186,7 +186,7 @@ def fid_score(codes_g, codes_r, eps=1e-6, **split_args):
     assert codes_r.shape[1] == d
 
     scores = np.zeros(len(splits_g))
-    with tqdm(splits_g, desc='FID') as bar:
+    with tqdm(splits_g, desc='FID', file=out) as bar:
         for i, (w_g, w_r) in enumerate(zip(bar, splits_r)):
             part_g = codes_g[w_g]
             part_r = codes_r[w_r]
