@@ -12,8 +12,6 @@ import compute_scores as cs
 
 class Scorer(object):
     def __init__(self, dataset, lr_scheduler=True, stdout=sys.stdout):
-        sys.stdout = stdout
-        sys.stderr = stdout
         self.stdout = stdout
         self.dataset = dataset
         if dataset == 'mnist':
@@ -45,7 +43,8 @@ class Scorer(object):
         while len(ims) < self.size // gan.batch_size:
             ims.append(gan.sess.run(gan.images))
         ims = np.concatenate(ims, axis=0)[:self.size]
-        _, self.train_codes = cs.featurize(ims * 255., self.model, get_preds=True, get_codes=True)
+        _, self.train_codes = cs.featurize(ims * 255., self.model, get_preds=True, 
+                                           get_codes=True, output=self.stdout)
         np.save(path, self.train_codes)
         print('[*] %d train images featurized and saved in <%s>' % (self.size, path))
                     
@@ -72,20 +71,19 @@ class Scorer(object):
                 print('WARNING! Inception min/max violated: min = %f, max = %f. Clipping values.' % (images4score.min(), images4score.max()))
                 images4score = images4score.clip(0., 255.)
                 
-        preds, codes = cs.featurize(images4score, self.model,
-                                    get_preds=True, get_codes=True)
+        preds, codes = cs.featurize(images4score, self.model, get_preds=True, 
+                                    get_codes=True, output=self.stdout)
         gan.timer(step, "featurizing finished")
         
         output['inception'] = scores = cs.inception_score(preds)
         gan.timer(step, "Inception mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
         
-        output['fid'] = scores = cs.fid_score(codes, self.train_codes, 
-                                              out=self.stdout,
+        output['fid'] = scores = cs.fid_score(codes, self.train_codes, output=self.stdout, 
                                               split_method='bootstrap',
                                               splits=3)
         gan.timer(step, "FID mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
         
-        ret = cs.polynomial_mmd_averages(codes, self.train_codes, 
+        ret = cs.polynomial_mmd_averages(codes, self.train_codes, output=self.stdout, 
                                         n_subsets=10, subset_size=1000, 
                                         ret_var=False)
         output['mmd2'] = mmd2s = ret

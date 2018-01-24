@@ -89,7 +89,7 @@ class LeNet(object):
 
 
 def featurize(images, model, batch_size=100, transformer=np.asarray,
-              get_preds=True, get_codes=False,
+              get_preds=True, get_codes=False, output=sys.stdout, 
               out_preds=None, out_codes=None):
     '''
     images: a list of numpy arrays with values in [0, 255]
@@ -134,7 +134,7 @@ def featurize(images, model, batch_size=100, transformer=np.asarray,
         ret += (codes,)
 
     # with model.sess:
-    with TqdmUpTo(unit='img', unit_scale=True, total=n) as t:
+    with TqdmUpTo(unit='img', unit_scale=True, total=n, file=output) as t:
         for start in range(0, n, batch_size):
             t.update_to(start)
             end = min(start + batch_size, n)
@@ -178,7 +178,7 @@ def inception_score(preds, **split_args):
     return scores
 
 
-def fid_score(codes_g, codes_r, eps=1e-6, out=sys.stdout, **split_args):
+def fid_score(codes_g, codes_r, eps=1e-6, output=sys.stdout, **split_args):
     splits_g = get_splits(codes_g.shape[0], **split_args)
     splits_r = get_splits(codes_r.shape[0], **split_args)
     assert len(splits_g) == len(splits_r)
@@ -186,7 +186,7 @@ def fid_score(codes_g, codes_r, eps=1e-6, out=sys.stdout, **split_args):
     assert codes_r.shape[1] == d
 
     scores = np.zeros(len(splits_g))
-    with tqdm(splits_g, desc='FID', file=out) as bar:
+    with tqdm(splits_g, desc='FID', file=output) as bar:
         for i, (w_g, w_r) in enumerate(zip(bar, splits_r)):
             part_g = codes_g[w_g]
             part_r = codes_r[w_r]
@@ -210,14 +210,14 @@ def fid_score(codes_g, codes_r, eps=1e-6, out=sys.stdout, **split_args):
 
 
 def polynomial_mmd_averages(codes_g, codes_r, n_subsets=50, subset_size=1000,
-                            ret_var=True, **kernel_args):
+                            ret_var=True, output=sys.stdout, **kernel_args):
     m = min(codes_g.shape[0], codes_r.shape[0])
     mmds = np.zeros(n_subsets)
     if ret_var:
         vars = np.zeros(n_subsets)
     choice = np.random.choice
 
-    with tqdm(range(n_subsets), desc='MMD') as bar:
+    with tqdm(range(n_subsets), desc='MMD', file=output) as bar:
         for i in bar:
             g = codes_g[choice(len(codes_g), subset_size, replace=False)]
             r = codes_r[choice(len(codes_r), subset_size, replace=False)]
