@@ -1,8 +1,6 @@
 from __future__ import division, print_function
 
-import os.path
-import tarfile
-
+import os.path, sys, tarfile
 import numpy as np
 from scipy import linalg
 from six.moves import range, urllib
