@@ -175,6 +175,26 @@ class DCGAN5Discriminator(Discriminator):
         hF = linear(tf.reshape(h4, [batch_size, -1]), o_dim, self.prefix + 'h6_lin')
         
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}        
+
+
+class ResNetDiscriminator(Discriminator):
+    def network(self, image, batch_size):
+        from core.resnet import block
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv')) 
+        h1 = block.ResidualBlock(self.prefix + 'res1', self.dim, 
+                                 2 * self.dim, 3, h0, resample='down')
+        h2 = block.ResidualBlock(self.prefix + 'res2', 2 * self.dim, 
+                                 4 * self.dim, 3, h1, resample='down')
+        h3 = block.ResidualBlock(self.prefix + 'res3', 4 * self.dim, 
+                                 8 * self.dim, 3, h2, resample='down')
+        h4 = block.ResidualBlock(self.prefix + 'res4', 8 * self.dim, 
+                                 8 * self.dim, 3, h3, resample='down')
+    
+        hF = tf.reshape(h4, [-1, 4 * 4 * 8 * self.dim])
+        hF = linear(self.prefix + 'h5_lin', 4 * 4 * 8 * self.dim, self.o_dim, hF)
+    
+        return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}  
+
         
 def get_networks(architecture):
     if architecture == 'dcgan':
@@ -183,4 +203,6 @@ def get_networks(architecture):
         return DCGAN5Generator, DCGAN5Discriminator
     elif 'g-resnet5' in architecture:
         return ResNetGenerator, DCGAN5Discriminator
+    elif architecture == 'resnet5':
+        return ResNetGenerator, ResNetDiscriminator
 

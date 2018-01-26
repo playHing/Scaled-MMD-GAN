@@ -1,6 +1,6 @@
 import functools
 import tensorflow as tf
-from core.resnet import ops
+from core.resnet.ops import conv2d, batchnorm, layernorm
 
 
 def ResidualBlock(name, input_dim, output_dim, filter_size, inputs, resample=None, he_init=True):
@@ -9,16 +9,16 @@ def ResidualBlock(name, input_dim, output_dim, filter_size, inputs, resample=Non
     """
     if resample=='down':
         conv_shortcut = MeanPoolConv
-        conv_1        = functools.partial(ops.conv2d.Conv2D, input_dim=input_dim, output_dim=input_dim)
+        conv_1        = functools.partial(conv2d.Conv2D, input_dim=input_dim, output_dim=input_dim)
         conv_2        = functools.partial(ConvMeanPool, input_dim=input_dim, output_dim=output_dim)
     elif resample=='up':
         conv_shortcut = UpsampleConv
         conv_1        = functools.partial(UpsampleConv, input_dim=input_dim, output_dim=output_dim)
-        conv_2        = functools.partial(ops.conv2d.Conv2D, input_dim=output_dim, output_dim=output_dim)
+        conv_2        = functools.partial(conv2d.Conv2D, input_dim=output_dim, output_dim=output_dim)
     elif resample==None:
-        conv_shortcut = ops.conv2d.Conv2D
-        conv_1        = functools.partial(ops.conv2d.Conv2D, input_dim=input_dim,  output_dim=input_dim)
-        conv_2        = functools.partial(ops.conv2d.Conv2D, input_dim=input_dim, output_dim=output_dim)
+        conv_shortcut = conv2d.Conv2D
+        conv_1        = functools.partial(conv2d.Conv2D, input_dim=input_dim,  output_dim=input_dim)
+        conv_2        = functools.partial(conv2d.Conv2D, input_dim=input_dim, output_dim=output_dim)
     else:
         raise Exception('invalid resample value')
 
@@ -45,7 +45,7 @@ def UpsampleConv(name, input_dim, output_dim, filter_size, inputs, he_init=True,
     output = tf.transpose(output, [0,2,3,1])
     output = tf.depth_to_space(output, 2)
     output = tf.transpose(output, [0,3,1,2])
-    output = ops.conv2d.Conv2D(name, input_dim, output_dim, filter_size, output, he_init=he_init, biases=biases)
+    output = conv2d.Conv2D(name, input_dim, output_dim, filter_size, output, he_init=he_init, biases=biases)
     return output
 
 
@@ -53,6 +53,6 @@ def Normalize(name, axes, inputs):
     if ('d_' in name):# and (MODE == 'wgan-gp'):
         if axes != [0,2,3]:
             raise Exception('Layernorm over non-standard axes is unsupported')
-        return ops.layernorm.Layernorm(name,[1,2,3],inputs)
+        return layernorm.Layernorm(name,[1,2,3],inputs)
     else:
-        return ops.batchnorm.Batchnorm(name,axes,inputs,fused=True)
+        return batchnorm.Batchnorm(name,axes,inputs,fused=True)
