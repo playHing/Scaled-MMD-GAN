@@ -1,3 +1,6 @@
+"""
+Based on https://github.com/igul222/improved_wgan_training/blob/master/gan_64x64.py.
+"""
 import functools
 import tensorflow as tf
 from core.resnet.ops import conv2d, batchnorm, layernorm
@@ -48,6 +51,19 @@ def UpsampleConv(name, input_dim, output_dim, filter_size, inputs, he_init=True,
     output = conv2d.Conv2D(name, input_dim, output_dim, filter_size, output, he_init=he_init, biases=biases)
     return output
 
+    
+def ConvMeanPool(name, input_dim, output_dim, filter_size, inputs, he_init=True, biases=True):
+    output = conv2d.Conv2D(name, input_dim, output_dim, filter_size, inputs, he_init=he_init, biases=biases)
+    output = tf.add_n([output[:,:,::2,::2], output[:,:,1::2,::2], output[:,:,::2,1::2], output[:,:,1::2,1::2]]) / 4.
+    return output
+    
+    
+def MeanPoolConv(name, input_dim, output_dim, filter_size, inputs, he_init=True, biases=True):
+    output = inputs
+    output = tf.add_n([output[:,:,::2,::2], output[:,:,1::2,::2], output[:,:,::2,1::2], output[:,:,1::2,1::2]]) / 4.
+    output = conv2d.Conv2D(name, input_dim, output_dim, filter_size, output, he_init=he_init, biases=biases)
+    return output
+    
 
 def Normalize(name, axes, inputs):
     if ('d_' in name):# and (MODE == 'wgan-gp'):
