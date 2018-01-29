@@ -1,3 +1,6 @@
+"""
+Based on https://github.com/igul222/improved_wgan_training/blob/master/
+"""
 from ... import resnet as lib
 import numpy as np
 import tensorflow as tf

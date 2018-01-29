@@ -179,8 +179,11 @@ class DCGAN5Discriminator(Discriminator):
 
 class ResNetDiscriminator(Discriminator):
     def network(self, image, batch_size):
-        from core.resnet import block
-        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv')) 
+        from core.resnet import block, ops
+        image = tf.transpose(image, [0, 3, 1, 2]) # NHWC to NCHW
+        
+        h0 = lrelu(ops.conv2d.Conv2D(self.prefix + 'h0_conv', 3, self.dim, 
+                                     3, image, he_init=False)) 
         h1 = block.ResidualBlock(self.prefix + 'res1', self.dim, 
                                  2 * self.dim, 3, h0, resample='down')
         h2 = block.ResidualBlock(self.prefix + 'res2', 2 * self.dim, 
