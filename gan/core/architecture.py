@@ -194,7 +194,7 @@ class ResNetDiscriminator(Discriminator):
                                  8 * self.dim, 3, h3, resample='down')
     
         hF = tf.reshape(h4, [-1, 4 * 4 * 8 * self.dim])
-        hF = linear(self.prefix + 'h5_lin', 4 * 4 * 8 * self.dim, self.o_dim, hF)
+        hF = linear(hF, self.o_dim, self.prefix + 'h5_lin')
     
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}  
 
