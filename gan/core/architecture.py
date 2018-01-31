@@ -200,11 +200,14 @@ class ResNetDiscriminator(Discriminator):
 
         
 def get_networks(architecture):
+    print('architec', architecture)
     if architecture == 'dcgan':
         return DCGANGenerator, DCGANDiscriminator
     elif architecture == 'dcgan5':
         return DCGAN5Generator, DCGAN5Discriminator
     elif 'g-resnet5' in architecture:
+        print('get_networks')
+        print(ResNetGenerator, DCGAN5Discriminator)
         return ResNetGenerator, DCGAN5Discriminator
     elif architecture == 'resnet5':
         return ResNetGenerator, ResNetDiscriminator
