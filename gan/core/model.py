@@ -28,8 +28,6 @@ class MMD_GAN(object):
         self.dataset = config.dataset
         if config.architecture == 'dc128':
             output_size = 128
-        elif config.output_size == 128:
-            config.architecture = 'dc128'
         if config.architecture in ['dc64', 'dcgan64']:
             output_size = 64
             
