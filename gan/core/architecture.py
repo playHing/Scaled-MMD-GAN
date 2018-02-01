@@ -176,6 +176,16 @@ class DCGAN5Discriminator(Discriminator):
         
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}        
 
+class FullConvDiscriminator(Discriminator):
+    def network(self, image, batch_size):
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv'))
+        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv')))
+        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv')))
+        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv')))
+        hF = lrelu(self.d_bn4(conv2d(h3, self.o_dim, name=self.prefix + 'hF_conv')))
+        hF = tf.reshape(hF, [batch_size, -1])
+        
+        return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF}
 
 class ResNetDiscriminator(Discriminator):
     def network(self, image, batch_size):
@@ -211,4 +221,7 @@ def get_networks(architecture):
         return ResNetGenerator, DCGAN5Discriminator
     elif architecture == 'resnet5':
         return ResNetGenerator, ResNetDiscriminator
+    elif architecture == 'd-fullconv5':
+        return DCGAN5Generator, FullConvDiscriminator
+    raise ValueError('Wrong architecture: "%s"' % architecture)
 
