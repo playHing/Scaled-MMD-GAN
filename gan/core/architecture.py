@@ -7,9 +7,14 @@ Created on Wed Jan 10 14:34:47 2018
 """
 import tensorflow as tf
 from core.ops import batch_norm, conv2d, deconv2d, linear, lrelu
+from core.mmd import _check_numerics
 from utils.misc import conv_sizes
 # Generators
-
+def check_numerics(x, name): 
+    if _check_numerics:
+        return tf.check_numerics(x, name)
+    return x
+    
 class Generator:
     def __init__(self, dim, c_dim, output_size, use_batch_norm, prefix='g_'):
         self.used = False
@@ -191,20 +196,26 @@ class ResNetDiscriminator(Discriminator):
     def network(self, image, batch_size):
         from core.resnet import block, ops
         image = tf.transpose(image, [0, 3, 1, 2]) # NHWC to NCHW
-        
+        image = check_numerics(image, self.prefix + 'image')
         h0 = lrelu(ops.conv2d.Conv2D(self.prefix + 'h0_conv', 3, self.dim, 
                                      3, image, he_init=False)) 
+        h0 = check_numerics(h0, self.prefix + 'h0_conv')
         h1 = block.ResidualBlock(self.prefix + 'res1', self.dim, 
                                  2 * self.dim, 3, h0, resample='down')
+        h1 = check_numerics(h1, self.prefix + 'res1')
         h2 = block.ResidualBlock(self.prefix + 'res2', 2 * self.dim, 
                                  4 * self.dim, 3, h1, resample='down')
+        h2 = check_numerics(h2, self.prefix + 'res2')
         h3 = block.ResidualBlock(self.prefix + 'res3', 4 * self.dim, 
                                  8 * self.dim, 3, h2, resample='down')
+        h3 = check_numerics(h3, self.prefix + 'res3')
         h4 = block.ResidualBlock(self.prefix + 'res4', 8 * self.dim, 
                                  8 * self.dim, 3, h3, resample='down')
+        h4 = check_numerics(h4, self.prefix + 'res4')
     
         hF = tf.reshape(h4, [-1, 4 * 4 * 8 * self.dim])
         hF = linear(hF, self.o_dim, self.prefix + 'h5_lin')
+        hF = check_numerics(hF, self.prefix + 'hF')
     
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}  
 

@@ -24,6 +24,7 @@ class MMD_GAN(object):
             dfc_dim: (optional) Dimension of discrim units for fully connected layer. [1024]
             c_dim: (optional) Dimension of image color. For grayscale input, set to 1. [3]
         """
+        self.check_numerics = mmd._check_numerics
         self.timer = timer.Timer()
         self.dataset = config.dataset
         if config.architecture == 'dc128':
@@ -127,6 +128,9 @@ class MMD_GAN(object):
         # tf.summary.histogram("z", self.z)
 
         self.G = generator(self.z, self.batch_size)
+        
+        if self.check_numerics:
+            self.G = tf.check_numerics(self.G, 'self.G')
 
         self.sampler = generator(self.sample_z, self.sample_size)
         
@@ -157,6 +161,10 @@ class MMD_GAN(object):
 
 
     def set_loss(self, G, images):
+        if self.check_numerics:
+            G = tf.check_numerics(G, 'G')
+            images = tf.check_numerics(images, 'images')
+            
         kernel = getattr(mmd, '_%s_kernel' % self.config.kernel)
         kerGI = kernel(G, images)
             
@@ -179,13 +187,24 @@ class MMD_GAN(object):
         real_data = self.images[:bs] # discirminator input level
         fake_data = self.G[:bs] # discriminator input level
         x_hat_data = (1. - alpha) * real_data + alpha * fake_data
+        if self.check_numerics:
+            x_hat_data = tf.check_numerics(x_hat_data, 'x_hat_data')
         x_hat = self.discriminator(x_hat_data, bs)
+        if self.check_numerics:
+            x_hat = tf.check_numerics(x_hat, 'x_hat')
         Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
         Ekxr, Ekxf = Ekx(real), Ekx(fake)
         witness = Ekxr - Ekxf
+        if self.check_numerics:
+            witness = tf.check_numerics(witness, 'witness')
         gradients = tf.gradients(witness, [x_hat_data])[0]
-        
-        penalty = tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0))
+        if self.check_numerics:
+            gradients = tf.check_numerics(gradients, 'gradients 0')
+
+        if self.check_numerics:  
+            penalty = tf.check_numerics(tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0)), 'penalty')
+        else:
+            penalty = tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0))
 
         with tf.variable_scope('loss'):
             if self.config.gradient_penalty > 0:
