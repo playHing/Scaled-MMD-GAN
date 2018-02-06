@@ -53,11 +53,12 @@ def main(_):
     pp.pprint(FLAGS.__flags)
         
     if FLAGS.threads < np.inf:
-        sess_config = tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)
+        sess_config = tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads,
+                                     allow_soft_placement=True, log_device_placement=True)
         sess_config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_mem
         
     else:
-        sess_config = tf.ConfigProto()
+        sess_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=True)
     if 'mmd' in FLAGS.model:
         from core.model import MMD_GAN as Model
     elif FLAGS.model == 'wgan_gp':
