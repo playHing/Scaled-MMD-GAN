@@ -53,11 +53,7 @@ class Cramer_GAN(MMD_GAN):
         
     def set_loss(self, G, G2, images):
         bs = min([self.batch_size, self.real_batch_size])
-        
-        if self.config.single_batch_experiment:
-            alpha = tf.constant(np.random.rand(bs), dtype=tf.float32, name='const_alpha')
-        else:
-            alpha = tf.random_uniform(shape=[bs])
+        alpha = tf.random_uniform(shape=[bs])
         alpha = tf.reshape(alpha, [bs, 1, 1, 1])
         real_data = self.images[:bs] #before discirminator
         fake_data = self.G[:bs] #before discriminator
@@ -67,7 +63,7 @@ class Cramer_GAN(MMD_GAN):
         critic = lambda x, x_ : safer_norm(x - x_, axis=1) - safer_norm(x, axis=1) 
         
         with tf.variable_scope('loss'):
-            if self.config.model == 'deepmind_cramer': # Cramer GAN paper
+            if self.config.model == 'cramer': # Cramer GAN paper
                 self.g_loss = tf.reduce_mean(
                     - safer_norm(G - G2, axis=1) + safer_norm(G - images, axis=1) + safer_norm(G2 - images, axis=1))
                 self.d_loss = -tf.reduce_mean(critic(images, G) - critic(G2, G))
