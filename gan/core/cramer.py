@@ -7,8 +7,14 @@ class Cramer_GAN(MMD_GAN):
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
         self.lr = tf.Variable(self.config.learning_rate, name='lr', 
                                   trainable=False, dtype=tf.float32)
-        self.lr_decay_op = self.lr.assign(tf.maximum(self.lr * self.config.decay_rate, 1.e-7))
-        
+        self.lr_decay_op = self.lr.assign(tf.maximum(self.lr * self.config.decay_rate, 1.e-6))
+        with tf.variable_scope('loss'):
+            if self.config.is_train and (self.config.gradient_penalty > 0):
+                self.gp = tf.Variable(self.config.gradient_penalty,
+                                      name='gradient_penalty',
+                                      trainable=False, dtype=tf.float32)
+                self.gp_decay_op = self.gp.assign(self.gp * self.config.gp_decay_rate)        
+
         self.set_pipeline()
 
         self.sample_z = tf.constant(np.random.uniform(-1, 1, size=(self.sample_size,
