@@ -71,8 +71,8 @@ def _dot_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
 def _sobolev_inf_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
     def _k(d):
         d3 = tf.pow(d, 3)
-        d3 += tf.float(tf.equals(d3, 0))
-        k = 2./np.pi *(tf.sin(d) - d * tf.cos(d)) / d3
+        invd3 = tf.where(tf.less(tf.abs(d3), 1e-7), d3, 1./d3)
+        k = 2./np.pi *(tf.sin(d) - d * tf.cos(d)) * invd3
         return tf.reduce_prod(k, axis=2)
         
     X_ = tf.expand_dims(X, 1)
