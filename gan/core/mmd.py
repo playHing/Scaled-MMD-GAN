@@ -66,7 +66,34 @@ def _dot_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
         K_YY = tf.check_numerics(K_YY, 'dot K_YY')    
     
     return K_XX, K_XY, K_YY, False
-   
+
+    
+def _sobolev_inf_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
+    X_ = tf.expand_dims(X, 1)
+    _Y = tf.expand_dims(Y, 0)
+
+    D_XY = X_ - _Y
+    K_XY = 2./np.pi *(tf.sin(D_XY) - D_XY * tf.cos(D_XY))/ tf.pow(D_XY, 3)
+    K_XY = tf.reduce_prod(K_XY, axis=2)
+    if check_numerics:
+        K_XX = tf.check_numerics(K_XY, 'sobolev_inf K_XY')
+    if K_XY_only:
+        return K_XY
+        
+    _X = tf.expand_dims(X, 0)
+    Y_ = tf.expand_dims(Y, 1)
+        
+    D_XX = X_ - _X
+    D_YY = Y_ - _Y   
+    K_XX = 2./np.pi *(tf.sin(D_XX) - D_XX * tf.cos(D_XX))/ tf.pow(D_XX, 3)
+    K_YY = 2./np.pi *(tf.sin(D_YY) - D_YY * tf.cos(D_YY))/ tf.pow(D_YY, 3)
+    K_XX = tf.reduce_prod(K_XX, axis=2)    
+    K_YY = tf.reduce_prod(K_YY, axis=2)  
+    if check_numerics:
+        K_XX = tf.check_numerics(K_XX, 'sobolev_inf K_XX')
+        K_YY = tf.check_numerics(K_YY, 'sobolev_inf K_YY')     
+    return K_XX, K_XY, K_YY, False
+    
     
 def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, 
                     K_XY_only=False, check_numerics=_check_numerics):
