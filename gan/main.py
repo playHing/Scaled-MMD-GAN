@@ -4,69 +4,76 @@ import core
 from utils.misc import pp, visualize
 
 import tensorflow as tf
+from tensorflow.python import debug as tf_debug
+import argparse
 
-flags = tf.app.flags
-flags.DEFINE_integer("max_iteration", 400000, "Epoch to train [400000]")
-flags.DEFINE_float("learning_rate", 2, "Learning rate [2]")
-flags.DEFINE_float("learning_rate_D", -1, "Learning rate for discriminator, if negative same as generator [-1]")
-flags.DEFINE_boolean("MMD_lr_scheduler", True, "Wheather to use lr scheduler based on 3-sample test")
-flags.DEFINE_float("decay_rate", 1.0, "Decay rate [1.0]")
-flags.DEFINE_float("gp_decay_rate", 1.0, "Decay rate [1.0]")
-flags.DEFINE_float("beta1", 0.5, "Momentum term of adam [0.5]")
-flags.DEFINE_float("init", 0.02, "Initialization value [0.02]")
-flags.DEFINE_integer("batch_size", 128, "The size of batch images [1000]")
-flags.DEFINE_integer("real_batch_size", -1, "The size of batch images for real samples. If -1 then same as batch_size [-1]")
-flags.DEFINE_integer("output_size", 32, "The size of the output images to produce [64]")
-flags.DEFINE_integer("c_dim", 3, "Dimension of image color. [3]")
-flags.DEFINE_string("dataset", "cifar10", "The name of the model fro saving puposes")
-flags.DEFINE_string("name", "mmd_test", "The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]")
-flags.DEFINE_string("checkpoint_dir", "checkpoint_mmd", "Directory name to save the checkpoints [checkpoint_mmd]")
-flags.DEFINE_string("sample_dir", "samples_mmd", "Directory name to save the image samples [samples_mmd]")
-flags.DEFINE_string("log_dir", "logs_mmd", "Directory name to save the image samples [logs_mmd]")
-flags.DEFINE_string("data_dir", "./data", "Directory containing datasets [./data]")
-flags.DEFINE_string("architecture", "dcgan", "The name of the architecture [dcgan, g-resnet5, dcgan5]")
-flags.DEFINE_string("kernel", "", "The name of the architecture ['', 'mix_rbf', 'mix_rq', 'distance', 'dot', 'mix_rq_dot']")
-flags.DEFINE_string("model", "mmd", "The model type [mmd, cramer, wgan_gp]")
-flags.DEFINE_boolean("is_train", True, "True for training, False for testing [Train]")
-flags.DEFINE_boolean("visualize", False, "True for visualizing, False for nothing [False]")
-flags.DEFINE_boolean("is_demo", False, "For testing [False]")
-flags.DEFINE_float("gradient_penalty", 0.0, "Use gradient penalty [0.0]")
-flags.DEFINE_integer("threads", np.inf, "Upper limit for number of threads [np.inf]")
-flags.DEFINE_integer("dsteps", 1, "Number of discriminator steps in a row [1] ")
-flags.DEFINE_integer("gsteps", 1, "Number of generator steps in a row [1] ")
-flags.DEFINE_integer("start_dsteps", 1, "Number of discrimintor steps in a row during first 20 steps and every 100th step" [1])
-flags.DEFINE_integer("df_dim", 64, "Discriminator no of channels at first conv layer [64]")
-flags.DEFINE_integer("dof_dim", 16, "No of discriminator output features [16]")
-flags.DEFINE_integer("gf_dim", 64, "no of generator channels [64]")
-flags.DEFINE_boolean("batch_norm", True, "Use of batch norm [False] (always False for discriminator if gradient_penalty > 0)")
-flags.DEFINE_boolean("log", True, "Wheather to write log to a file in samples directory [True]")
-flags.DEFINE_string("suffix", '', "Fo additional settings ['', '_tf_records']")
-flags.DEFINE_boolean('compute_scores', False, "Compute scores")
-flags.DEFINE_float("gpu_mem", .9, "GPU memory fraction limit [1.0]")
-flags.DEFINE_float("L2_discriminator_penalty", 0.0, "L2 penalty on discriminator features [0.0]")
-flags.DEFINE_integer("no_of_samples", 100000, "number of samples to produce")
-flags.DEFINE_boolean("print_pca", False, "")
-flags.DEFINE_integer("save_layer_outputs", 0, "Wheather to save_layer_outputs. If == 2, saves outputs at exponential steps: 1, 2, 4, ..., 512 and every 1000. [0, 1, 2]")
-FLAGS = flags.FLAGS
+parser = argparse.ArgumentParser()
+parser.add_argument('-max_iteration',       default=400000, type=int, help='Epoch to train [400000]')
+parser.add_argument('-learning_rate',       default=0.0001, type=float, help='Learning rate [2]')
+parser.add_argument('-learning_rate_D',     default=-1, type=float, help='Learning rate for discriminator, if negative same as generator [-1]')
+parser.add_argument('-MMD_lr_scheduler',    default=True, type=bool, help='Wheather to use lr scheduler based on 3-sample test')
+parser.add_argument('-decay_rate',          default=.8, type=float, help='Decay rate [1.0]')
+parser.add_argument('-gp_decay_rate',       default=.8, type=float, help='Decay rate [1.0]')
+parser.add_argument('-beta1',               default=0.5, type=float, help='Momentum term of adam [0.5]')
+parser.add_argument('-init',                default=0.02, type=float, help='Initialization value [0.02]')
+parser.add_argument('-batch_size',          default=64, type=int, help='The size of batch images [1000]')
+parser.add_argument('-real_batch_size',     default=-1 , type=int, help='The size of batch images for real samples. If -1 then same as batch_size [-1]')
+parser.add_argument('-output_size',         default=128, type=int, help='The size of the output images to produce [64')
+parser.add_argument('-c_dim',               default=3, type=int, help='Dimension of image color. [3]')
+parser.add_argument('-dataset',             default="cifar10", type=str, help='The name of the model fro saving puposes')
+parser.add_argument('-name',                default="mmd_test", type=str, help='The name of dataset [celebA, mnist, lsun, cifar10, GaussianMix]')
+parser.add_argument('-checkpoint_dir',      default="checkpoint_mmd", type=str, help='Directory name to save the checkpoints [checkpoint_mmd]')
+parser.add_argument('-sample_dir',          default="sample_mmd", type=str, help='Directory name to save the image samples [samples_mmd]')
+parser.add_argument('-log_dir',             default="log_mmd", type=str, help='Directory name to save the image samples [logs_mmd]')
+parser.add_argument('-data_dir',            default="data", type=str, help='Directory containing datasets [./data]')
+parser.add_argument('-architecture',        default="dcgan", type=str, help='The name of the architecture [dcgan, g-resnet5, dcgan5]')
+parser.add_argument('-kernel',              default="", type=str, help="The name of the architecture ['', 'mix_rbf', 'mix_rq', 'distance', 'dot', 'mix_rq_dot']")
+parser.add_argument('-model',               default="mmd", type=str, help='The model type [mmd, cramer, wgan_gp]')
+parser.add_argument('-is_train',            default=True, type=bool, help='True for training, False for testing [Train]')
+parser.add_argument('-visualize',           default=False, type=bool, help='True for visualizing, False for nothing [False]')
+parser.add_argument('-is_demo',             default=False, type=bool, help='For testing [False]')
+parser.add_argument('-hessian_scale',       default=False, type=bool, help='For scaling the MMD')
+parser.add_argument('-scale_variant',       default=0, type=int, help='The variant of the scaled MMD')
+parser.add_argument('-gradient_penalty',    default=0.0, type=float, help='Use gradient penalty [0.0]')
+parser.add_argument('-threads',             default=-1, type=int, help='Upper limit for number of threads [np.inf]')
+parser.add_argument('-dsteps',              default=5, type=int, help='Number of discriminator steps in a row [1]')
+parser.add_argument('-gsteps',              default=1, type=int, help='Number of generator steps in a row [1]')
+parser.add_argument('-start_dsteps',        default=10, type=int, help='Number of discrimintor steps in a row during first 20 steps and every 100th step [1]')
+parser.add_argument('-df_dim',              default=64, type=int, help='Discriminator no of channels at first conv layer [64]')
+parser.add_argument('-dof_dim',             default=16, type=int, help='No of discriminator output features [16]')
+parser.add_argument('-gf_dim',              default=61, type=int, help='No of generator channels [64]')
+parser.add_argument('-batch_norm',          default=True, type=bool, help='Use of batch norm [False] (always False for discriminator if gradient_penalty > 0)')
+parser.add_argument('-log',                 default=True, type=bool, help='Wheather to write log to a file in samples directory [True]')
+parser.add_argument('-compute_scores',      default=False, type=bool, help='Compute scores')
+parser.add_argument('-print_pca',           default=False, type=bool, help='Print the PCA')
+parser.add_argument('-suffix',              default="", type=str, help="Fo additional settings ['', '_tf_records']")
+parser.add_argument('-gpu_mem',             default=.9, type=float, help="GPU memory fraction limit [1.0]")
+parser.add_argument('-no_of_samples',       default=100000, type=int, help="number of samples to produce")
+parser.add_argument('-save_layer_outputs',  default=0, type=int, help="Wheather to save_layer_outputs. If == 2, saves outputs at exponential steps: 1, 2, 4, ..., 512 and every 1000. [0, 1, 2]")
+parser.add_argument('-L2_discriminator_penalty',default=0.0, type=float, help="L2 penalty on discriminator features [0.0]")
+FLAGS = parser.parse_args()   
 
 def main(_):
-    pp.pprint(FLAGS.__flags)
+    pp.pprint(vars(FLAGS))
         
-    if FLAGS.threads < np.inf:
+    if FLAGS.threads > -1:
         sess_config = tf.ConfigProto(intra_op_parallelism_threads=FLAGS.threads)
         sess_config.gpu_options.per_process_gpu_memory_fraction = FLAGS.gpu_mem
         
     else:
         sess_config = tf.ConfigProto()
-    if 'mmd' in FLAGS.model:
+    if FLAGS.model == 'mmd':
         from core.model import MMD_GAN as Model
     elif FLAGS.model == 'wgan_gp':
         from core.wgan_gp import WGAN_GP as Model
     elif 'cramer' in FLAGS.model:
         from core.cramer import Cramer_GAN as Model
+    elif FLAGS.model == 'wmmd':
+        from core.wmmd import WMMD as Model
 
-        
     with tf.Session(config=sess_config) as sess:
+        #sess = tf_debug.tf_debug.TensorBoardDebugWrapperSession(sess,'localhost:6064')
+        #sess.add_tensor_filter("has_inf_or_nan", tf_debug.has_inf_or_nan)
         if FLAGS.dataset == 'mnist':
             gan = Model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
                         data_dir=FLAGS.data_dir)

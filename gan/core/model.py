@@ -81,23 +81,31 @@ class MMD_GAN(object):
         if config.compute_scores:
             self.scorer = scorer.Scorer(self.dataset, config.MMD_lr_scheduler, stdout=stdout)
         print('Execution start time: %s' % time.ctime())
-        pprint.PrettyPrinter().pprint(self.config.__dict__['__flags'])
+        pprint.PrettyPrinter().pprint(vars(self.config))
         self.build_model()
         
         self.initialized_for_sampling = config.is_train
 
     def _ensure_dirs(self, folders=['sample', 'log', 'checkpoint']):
+        success  =True
         if type(folders) == str:
             folders = [folders]
         for folder in folders:
             ff = folder + '_dir'
-            if not os.path.exists(ff):
-                os.makedirs(ff)
-            self.__dict__[ff] = os.path.join(self.config.__getattr__(ff),
+            #if not os.path.exists(ff):
+            #    os.makedirs(ff)
+            
+            self.__dict__[ff] = os.path.join(vars(self.config)[ff],
                                              self.config.name + self.config.suffix,
                                              self.description)
-            if not os.path.exists(self.__dict__[ff]):
-                os.makedirs(self.__dict__[ff])
+            if not vars(self.config)[ff] == "":
+                if not os.path.exists(self.__dict__[ff]):
+                    os.makedirs(self.__dict__[ff])
+            else:
+                success = False
+        return success
+
+
             
 
     def build_model(self):
@@ -141,9 +149,9 @@ class MMD_GAN(object):
             self.set_loss(self.d_G, self.d_images)
 
         block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
-        tf.summary.image("train/input image", 
+        tf.summary.image("train/input_image", 
                          self.imageRearrange(tf.clip_by_value(self.images, 0, 1), block))
-        tf.summary.image("train/gen image", 
+        tf.summary.image("train/gen_image", 
                          self.imageRearrange(tf.clip_by_value(self.G, 0, 1), block))
         
         t_vars = tf.trainable_variables()
@@ -190,11 +198,11 @@ class MMD_GAN(object):
         with tf.variable_scope('loss'):
             if self.config.gradient_penalty > 0:
                 self.d_loss += penalty * self.gp
-                self.optim_name += ' (gp %.1f)' % self.config.gradient_penalty
+                self.optim_name += '_(gp %.1f)' % self.config.gradient_penalty
                 tf.summary.scalar('dx_penalty', penalty)
                 print('[*] Gradient penalty added')
-            tf.summary.scalar(self.optim_name + ' G', self.g_loss)
-            tf.summary.scalar(self.optim_name + ' D', self.d_loss)
+            tf.summary.scalar(self.optim_name + '_G', self.g_loss)
+            tf.summary.scalar(self.optim_name + '_D', self.d_loss)
     
     
     def add_l2_penalty(self):
@@ -219,7 +227,7 @@ class MMD_GAN(object):
                 loss=self.g_loss,
                 var_list=self.g_vars
             )       
-            self.g_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.g_gvs]
+            #self.g_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.g_gvs]
             self.g_grads = self.g_optim.apply_gradients(
                 self.g_gvs, 
                 global_step=self.global_step
@@ -235,7 +243,7 @@ class MMD_GAN(object):
                 var_list=self.d_vars
             )
             # negative gradients not needed - by definition d_loss = -optim_loss
-            self.d_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
+            #self.d_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
             self.d_grads = self.d_optim.apply_gradients(self.d_gvs) # minimizes self.d_loss <==> max MMD    
         print('[*] Gradients set')
     
@@ -253,6 +261,7 @@ class MMD_GAN(object):
             self.g_counter = (self.g_counter + 1) % self.config.gsteps        
 
         eval_ops = [self.g_gvs, self.d_gvs, self.g_loss, self.d_loss]
+        #g_grads_0,g_loss_0,G_img,img = self.sess.run([self.g_gvs, self.g_loss, self.d_G, self.d_images])
         if self.config.is_demo:
             summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
                 [self.TrainSummary] + eval_ops
@@ -269,11 +278,15 @@ class MMD_GAN(object):
                 _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
             et = self.timer(step, "g step" if (self.d_counter == 0) else "d step", False)
 
+
+        if np.isinf(g_loss) or np.isnan(g_loss):
+            print("Inf g_loss, epoch: ")
+        
         assert ~np.isnan(g_loss), et + "NaN g_loss, epoch: "
         assert ~np.isnan(d_loss), et + "NaN d_loss, epoch: "
         # if G STEP, after D steps
         if self.d_counter == 0:
-            if step % 10000 == 0:
+            if step % 1000 == 0:
                 try:
                     self.writer.add_summary(summary_str, step)
                     self.err_counter = 0
@@ -357,14 +370,14 @@ class MMD_GAN(object):
 
 
     def save_checkpoint(self, step=None):
-        self._ensure_dirs('checkpoint')
-        if step is None:
-            self.saver.save(self.sess,
-                            os.path.join(self.checkpoint_dir, "best.model"))
-        else:
-            self.saver.save(self.sess,
-                            os.path.join(self.checkpoint_dir, "MMDGAN.model"),
-                            global_step=step)
+        if self._ensure_dirs('checkpoint'):
+            if step is None:
+                self.saver.save(self.sess,
+                                os.path.join(self.checkpoint_dir, "best.model"))
+            else:
+                self.saver.save(self.sess,
+                                os.path.join(self.checkpoint_dir, "MMDGAN.model"),
+                                global_step=step)
 
 
     def load_checkpoint(self):

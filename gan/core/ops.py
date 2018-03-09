@@ -160,7 +160,7 @@ class linear_n:
 
 def safer_norm(tensor, axis=None, keep_dims=False, epsilon=_eps):
     sq = tf.square(tensor)
-    squares = tf.reduce_sum(sq, axis=axis, keep_dims=keep_dims)
+    squares = tf.reduce_sum(sq, axis=axis, keepdims=keep_dims)
     return tf.sqrt(squares + epsilon)
 
 

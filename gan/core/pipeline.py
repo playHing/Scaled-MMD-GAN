@@ -13,7 +13,7 @@ from PIL import Image
 from glob import glob
 import matplotlib.pyplot as plt
 
-class Pipeline:
+class Pipeline(object):
     def __init__(self, output_size, c_dim, batch_size, data_dir, **kwargs):
         self.output_size = output_size
         self.c_dim = c_dim
@@ -40,7 +40,7 @@ class Pipeline:
     
 
 class LMDB(Pipeline):
-    def __init__(self, *args, timer=None, **kwargs):
+    def __init__(self, timer=None,*args,  **kwargs):
 #        print(*args)
 #        print(**kwargs)
         super(LMDB, self).__init__(*args, **kwargs)
@@ -110,7 +110,7 @@ class TfRecords(Pipeline):
 
 
 class JPEG(Pipeline):
-    def __init__(self, *args, base_size=160, random_crop=9, **kwargs):
+    def __init__(self,base_size=160, random_crop=9, *args,  **kwargs):
         super(JPEG, self).__init__(*args, **kwargs)
         files = glob(os.path.join(self.data_dir, '*.jpg'))
 
@@ -194,7 +194,7 @@ class Cifar10(Pipeline):
         
 
 class GaussianMix(Pipeline):
-    def __init__(self, *args, sample_dir='/', means=[.0, 3.0], stds=[1.0, .5], size=1000, **kwargs):
+    def __init__(self,sample_dir='/', means=[.0, 3.0], stds=[1.0, .5], size=1000,  *args, **kwargs):
         super(GaussianMix, self).__init__(*args, **kwargs)
         from matplotlib import animation
         

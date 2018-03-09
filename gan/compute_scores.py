@@ -219,7 +219,7 @@ def polynomial_mmd_averages(codes_g, codes_r, n_subsets=50, subset_size=1000,
         for i in bar:
             g = codes_g[choice(len(codes_g), subset_size, replace=False)]
             r = codes_r[choice(len(codes_r), subset_size, replace=False)]
-            o = polynomial_mmd(g, r, **kernel_args, var_at_m=m, ret_var=ret_var)
+            o = polynomial_mmd(g, r,  var_at_m=m, ret_var=ret_var,**kernel_args)
             if ret_var:
                 mmds[i], vars[i] = o
             else:

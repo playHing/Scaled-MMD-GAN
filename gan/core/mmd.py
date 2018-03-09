@@ -50,6 +50,37 @@ def _dot_kernel(X, Y, K_XY_only=False):
     
     return K_XX, K_XY, K_YY, False
    
+
+def _rbf_kernel(X, Y, sigma = 1., wt=1., 
+                    K_XY_only=False):
+
+    XX = tf.matmul(X, X, transpose_b=True)
+    XY = tf.matmul(X, Y, transpose_b=True)
+    YY = tf.matmul(Y, Y, transpose_b=True)
+        
+    X_sqnorms = tf.diag_part(XX)
+    Y_sqnorms = tf.diag_part(YY)
+
+    r = lambda x: tf.expand_dims(x, 0)
+    c = lambda x: tf.expand_dims(x, 1)
+    
+    XYsqnorm = tf.maximum(-2 * XY + c(X_sqnorms) + r(Y_sqnorms),0.)
+
+    gamma = 1 / (2 * sigma**2)
+    K_XY = wt * tf.exp(-gamma * XYsqnorm)
+        
+    if K_XY_only:
+        return K_XY
+    
+    XXsqnorm = tf.maximum(-2 * XX + c(X_sqnorms) + r(X_sqnorms),0.)
+    YYsqnorm = tf.maximum(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms),0.)
+
+    gamma = 1 / (2 * sigma**2)
+    K_XX = wt * tf.exp(-gamma * XXsqnorm)
+    K_YY = wt * tf.exp(-gamma * YYsqnorm)
+        
+    return K_XX, K_XY, K_YY, wt
+
     
 def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, 
                     K_XY_only=False):
@@ -68,7 +99,7 @@ def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None,
 
     K_XX, K_XY, K_YY = 0, 0, 0
     
-    XYsqnorm = -2 * XY + c(X_sqnorms) + r(Y_sqnorms)
+    XYsqnorm = tf.maximum(-2 * XY + c(X_sqnorms) + r(Y_sqnorms),0.)
     for sigma, wt in zip(sigmas, wts):
         gamma = 1 / (2 * sigma**2)
         K_XY += wt * tf.exp(-gamma * XYsqnorm)
@@ -76,8 +107,8 @@ def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None,
     if K_XY_only:
         return K_XY
     
-    XXsqnorm = -2 * XX + c(X_sqnorms) + r(X_sqnorms)
-    YYsqnorm = -2 * YY + c(Y_sqnorms) + r(Y_sqnorms)
+    XXsqnorm = tf.maximum(-2 * XX + c(X_sqnorms) + r(X_sqnorms),0.)
+    YYsqnorm = tf.maximum(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms),0.)
     for sigma, wt in zip(sigmas, wts):
         gamma = 1 / (2 * sigma**2)
         K_XX += wt * tf.exp(-gamma * XXsqnorm)
