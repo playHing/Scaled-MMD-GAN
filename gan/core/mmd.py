@@ -11,9 +11,6 @@ from .ops import dot, sq_sum
 
 mysqrt = lambda x: tf.sqrt(tf.maximum(x + _eps, 0.))
 
-################################################################################
-### Quadratic-time MMD with Gaussian RBF kernel
-
 def _distance_kernel(X, Y, K_XY_only=False):
     XX = tf.matmul(X, X, transpose_b=True)
     XY = tf.matmul(X, Y, transpose_b=True)
@@ -156,10 +153,6 @@ def _mix_rq_kernel(X, Y, alphas=[.1, 1., 10.], wts=None, K_XY_only=False, add_do
     # wts = tf.reduce_sum(tf.cast(wts, tf.float32))
     wts = tf.reduce_sum(tf.cast(wts, tf.float32))
     return K_XX, K_XY, K_YY, wts
-
-    
-################################################################################
-### Helper functions to compute variances based on kernel matrices
 
 
 def mmd2(K, biased=False):
