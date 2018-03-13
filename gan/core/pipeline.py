@@ -40,7 +40,7 @@ class Pipeline:
     
 
 class LMDB(Pipeline):
-    def __init__(self, *args, timer=None, **kwargs):
+    def __init__(self, *args, **kwargs):
 #        print(*args)
 #        print(**kwargs)
         super(LMDB, self).__init__(*args, **kwargs)
@@ -60,7 +60,6 @@ class LMDB(Pipeline):
         
         
     def _get_sample_from_lmdb(self, key, limit=None):
-        print('_get_sample_from_lmdb')
         if limit is None:
             limit = self.read_batch
         with tf.device('/cpu:0'):
@@ -75,15 +74,15 @@ class LMDB(Pipeline):
                 cursor = txn.cursor()
                 cursor.set_key(key)
                 while len(ims) < limit:
-                    print('len(ims) = ', len(ims))
-                    key, byte_arr = cursor.item()
-                    byte_im = io.BytesIO(byte_arr)
-                    byte_im.seek(0)
+                    try:
+                        key, byte_arr = cursor.item()
+                        byte_im = io.BytesIO(byte_arr)
+                    #byte_im.seek(0)
                   #  try:
-                    im = Image.open(byte_im)
-                    ims.append(misc.center_and_scale(im, size=self.output_size))
-                  #  except Exception as e:
-                  #      print(e)
+                        im = Image.open(byte_im)
+                        ims.append(misc.center_and_scale(im, size=self.output_size))
+                    except Exception as e:
+                        print(e)
                     if not cursor.next():
                         cursor.first()
             env.close()
