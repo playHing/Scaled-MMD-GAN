@@ -40,7 +40,7 @@ class Pipeline:
     
 
 class LMDB(Pipeline):
-    def __init__(self, *args, timer=None, **kwargs):
+    def __init__(self, *args, **kwargs):
 #        print(*args)
 #        print(**kwargs)
         super(LMDB, self).__init__(*args, **kwargs)
@@ -73,10 +73,10 @@ class LMDB(Pipeline):
                 cursor = txn.cursor()
                 cursor.set_key(key)
                 while len(ims) < limit:
-                    key, byte_arr = cursor.item()
-                    byte_im = io.BytesIO(byte_arr)
-                    byte_im.seek(0)
                     try:
+                        key, byte_arr = cursor.item()
+                        byte_im = io.BytesIO(byte_arr)
+                     #   byte_im.seek(0)
                         im = Image.open(byte_im)
                         ims.append(misc.center_and_scale(im, size=self.output_size))
                     except Exception as e:
