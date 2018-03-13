@@ -8,10 +8,10 @@ Created on Thu Jan 11 14:11:46 2018
 import os, time, lmdb, io
 import numpy as np
 import tensorflow as tf
-from utils import misc
 from PIL import Image
 from glob import glob
 import matplotlib.pyplot as plt
+from utils import misc
 
 class Pipeline:
     def __init__(self, output_size, c_dim, batch_size, data_dir, **kwargs):
@@ -44,15 +44,15 @@ class LMDB(Pipeline):
 #        print(*args)
 #        print(**kwargs)
         super(LMDB, self).__init__(*args, **kwargs)
-        self.timer = timer
+        self.timer = kwargs.get('timer', None)
         self.keys = []
         env = lmdb.open(self.data_dir, map_size=1099511627776, max_readers=100, readonly=True)
         with env.begin() as txn:
             cursor = txn.cursor()
             while cursor.next():
                 self.keys.append(cursor.key())
-        print('Number of records in lmdb: %d' % len(self.keys))
         env.close()
+        print('No. of records in lmdb database: %d' % len(self.keys))
         # tf queue for getting keys
         key_producer = tf.train.string_input_producer(self.keys, shuffle=True)
         single_key = key_producer.dequeue()
@@ -60,6 +60,7 @@ class LMDB(Pipeline):
         
         
     def _get_sample_from_lmdb(self, key, limit=None):
+        print('_get_sample_from_lmdb')
         if limit is None:
             limit = self.read_batch
         with tf.device('/cpu:0'):
@@ -68,19 +69,21 @@ class LMDB(Pipeline):
             tt = time.time()
             self.timer(rc, 'read start')
             env = lmdb.open(self.data_dir, map_size=1099511627776, max_readers=100, readonly=True)
+            print('lmdb opened, read_count = ', self.read_count)
             ims = []
             with env.begin(write=False) as txn:
                 cursor = txn.cursor()
                 cursor.set_key(key)
                 while len(ims) < limit:
+                    print('len(ims) = ', len(ims))
                     key, byte_arr = cursor.item()
                     byte_im = io.BytesIO(byte_arr)
                     byte_im.seek(0)
-                    try:
-                        im = Image.open(byte_im)
-                        ims.append(misc.center_and_scale(im, size=self.output_size))
-                    except Exception as e:
-                        print(e)
+                  #  try:
+                    im = Image.open(byte_im)
+                    ims.append(misc.center_and_scale(im, size=self.output_size))
+                  #  except Exception as e:
+                  #      print(e)
                     if not cursor.next():
                         cursor.first()
             env.close()
@@ -112,6 +115,8 @@ class TfRecords(Pipeline):
 class JPEG(Pipeline):
     def __init__(self, *args, base_size=160, random_crop=9, **kwargs):
         super(JPEG, self).__init__(*args, **kwargs)
+        #base_size = kwargs.get('base_size', 160)
+        #random_crop = kwargs.get('random_crop', 9)
         files = glob(os.path.join(self.data_dir, '*.jpg'))
 
         filename_queue = tf.train.string_input_producer(files, shuffle=True)
