@@ -93,6 +93,45 @@ def _sobolev_inf_kernel(X, Y, K_XY_only=False, check_numerics=_check_numerics):
         K_XX = tf.check_numerics(K_XX, 'sobolev_inf K_XX')
         K_YY = tf.check_numerics(K_YY, 'sobolev_inf K_YY')     
     return K_XX, K_XY, K_YY, False
+
+def _laplace_kernel(X, Y, wts=None,
+                    K_XY_only=False, check_numerics=_check_numerics):
+
+    XX = tf.matmul(X, X, transpose_b=True)
+    XY = tf.matmul(X, Y, transpose_b=True)
+    YY = tf.matmul(Y, Y, transpose_b=True)
+    if check_numerics:
+        XX = tf.check_numerics(XX, 'rbf XX')
+        XY = tf.check_numerics(XY, 'rbf XY')
+        YY = tf.check_numerics(YY, 'rbf YY')
+
+    X_sqnorms = tf.diag_part(XX)
+    Y_sqnorms = tf.diag_part(YY)
+
+    r = lambda x: tf.expand_dims(x, 0)
+    c = lambda x: tf.expand_dims(x, 1)
+
+    K_XX, K_XY, K_YY = 0, 0, 0
+
+    XYnorm = mysqrt(-2 * XY + c(X_sqnorms) + r(Y_sqnorms))
+    K_XY = .5 * tf.exp(-XYnorm)
+
+    if check_numerics:
+        K_XY = tf.check_numerics(K_XY, 'laplace K_XY')
+
+    if K_XY_only:
+        return K_XY
+
+    XXnorm = mysqrt(-2 * XX + c(X_sqnorms) + r(X_sqnorms))
+    YYnorm = mysqrt(-2 * YY + c(Y_sqnorms) + r(Y_sqnorms))
+    K_XX = .5 * tf.exp(-XXnorm)
+    K_YY = .5 * tf.exp(-YYnorm)
+
+    if check_numerics:
+        K_XX = tf.check_numerics(K_XX, 'laplace K_XX')
+        K_YY = tf.check_numerics(K_YY, 'laplace K_YY')
+
+    return K_XX, K_XY, K_YY, 1
     
     
 def _mix_rbf_kernel(X, Y, sigmas=[2.0, 5.0, 10.0, 20.0, 40.0, 80.0], wts=None, 

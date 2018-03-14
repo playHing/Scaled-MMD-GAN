@@ -66,10 +66,10 @@ class LMDB(Pipeline):
             rc = self.read_count
             self.read_count += 1
             tt = time.time()
-            self.timer(rc, 'lmdb: start reading chunk from database')
             ims = []
             db_count = 1
             while len(ims) < limit:
+                self.timer(rc, 'lmdb: start reading chunk from database, attempt: %d' % db_count)
                 env = lmdb.open(self.data_dir, map_size=1099511627776, max_readers=100, readonly=True)
                 with env.begin(write=False) as txn:
                     cursor = txn.cursor()
@@ -81,7 +81,7 @@ class LMDB(Pipeline):
                         try:
                             key, byte_arr = cursor.item()
                             byte_im = io.BytesIO(byte_arr)
-                        #   byte_im.seek(0)
+                            byte_im.seek(0)
                             im = Image.open(byte_im)
                             ims.append(misc.center_and_scale(im, size=self.output_size))
                         except Exception as e:
