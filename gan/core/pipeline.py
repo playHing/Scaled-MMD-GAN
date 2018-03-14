@@ -44,7 +44,7 @@ class LMDB(Pipeline):
 #        print(*args)
 #        print(**kwargs)
         super(LMDB, self).__init__(*args, **kwargs)
-        self.timer = timer
+        self.timer = kwargs.get('timer', None) 
         self.keys = []
         env = lmdb.open(self.data_dir, map_size=1099511627776, max_readers=100, readonly=True)
         with env.begin() as txn:
@@ -66,25 +66,33 @@ class LMDB(Pipeline):
             rc = self.read_count
             self.read_count += 1
             tt = time.time()
-            self.timer(rc, 'read start')
-            env = lmdb.open(self.data_dir, map_size=1099511627776, max_readers=100, readonly=True)
+            self.timer(rc, 'lmdb: start reading chunk from database')
             ims = []
-            with env.begin(write=False) as txn:
-                cursor = txn.cursor()
-                cursor.set_key(key)
-                while len(ims) < limit:
-                    try:
-                        key, byte_arr = cursor.item()
-                        byte_im = io.BytesIO(byte_arr)
-                     #   byte_im.seek(0)
-                        im = Image.open(byte_im)
-                        ims.append(misc.center_and_scale(im, size=self.output_size))
-                    except Exception as e:
-                        print(e)
+            db_count = 1
+            while len(ims) < limit:
+                env = lmdb.open(self.data_dir, map_size=1099511627776, max_readers=100, readonly=True)
+                with env.begin(write=False) as txn:
+                    cursor = txn.cursor()
+                    cursor.set_key(key)
                     if not cursor.next():
                         cursor.first()
-            env.close()
-            self.timer(rc, 'read time = %f' % (time.time() - tt))
+                    db_err = False
+                    while (len(ims) < limit) and (not db_err):
+                        try:
+                            key, byte_arr = cursor.item()
+                            byte_im = io.BytesIO(byte_arr)
+                        #   byte_im.seek(0)
+                            im = Image.open(byte_im)
+                            ims.append(misc.center_and_scale(im, size=self.output_size))
+                        except Exception as e:
+                            self.timer(rc, 'lmdb error: ' + str(e))
+                            self.timer(rc, 'lmdb open no. %d failed at key %s, with %d collected images' % (db_count, repr(key), len(ims)))
+                            db_count += 1
+                            db_err = True
+                        if not cursor.next():
+                            cursor.first()
+                env.close()
+            self.timer(rc, 'lmdb read time = %f' % (time.time() - tt))
             return np.asarray(ims, dtype=np.float32)       
      
         
