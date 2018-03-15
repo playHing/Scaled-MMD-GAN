@@ -110,8 +110,10 @@ class TfRecords(Pipeline):
 
 
 class JPEG(Pipeline):
-    def __init__(self,base_size=160, random_crop=9, *args,  **kwargs):
+    def __init__(self,*args,  **kwargs):
         super(JPEG, self).__init__(*args, **kwargs)
+        base_size=160 
+        random_crop=9
         files = glob(os.path.join(self.data_dir, '*.jpg'))
 
         filename_queue = tf.train.string_input_producer(files, shuffle=True)
