@@ -22,28 +22,22 @@ class WMMD(MMD_GAN):
         print('[*] Loss set')
     def scale_by_hs_norm(self,kernel):
 
+
         bs = min([self.batch_size, self.real_batch_size])
         alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
-
         x_hat_data = self.images[:bs]
-
-        #real_data = self.images[:bs] # discirminator input level
-        #fake_data = self.G[:bs] # discriminator input level
-        #x_hat_data = (1. - alpha) * real_data + alpha * fake_data
         x_hat = self.discriminator(x_hat_data, bs)
-        #avg_kernel = kernel(x_hat, x_hat)
-        #hessians = tf.hessians(avg_kernel, [x_hat_data])
-        #scale = tf.reduce_sum(tf.reduce_mean(tf.square(safer_norm(hessians, axis=1), axis = 0)))
-        grad_x_hat = tf.gradients(tf.reduce_sum(x_hat, axis = 1), [x_hat_data])[0]
-        scale = tf.reduce_mean(tf.square(tf.reduce_sum(grad_x_hat, axis =[1,2])))
+        grad_x_hat = tf.gradients(x_hat, [x_hat_data])
+        scale = tf.reduce_mean( tf.reduce_sum( tf.square(grad_x_hat), axis = [1,2,3]) )
+        unscaled_g_loss = 1*self.g_loss
         with tf.variable_scope('loss'):
             if self.config.hessian_scale:
+                tf.summary.scalar(self.optim_name + '_unscaled_G', unscaled_g_loss)
                 self.apply_scaling(scale)
-                #self.optim_name += ' (gp %.1f)' % self.config.W
                 tf.summary.scalar('dx_scale', scale)
                 print('[*] Hessian Scaling added')
-            tf.summary.scalar(self.optim_name + '_G', self.g_loss)
-            tf.summary.scalar(self.optim_name + '_D', self.d_loss)
+                tf.summary.scalar(self.optim_name + '_G', self.g_loss)
+                tf.summary.scalar(self.optim_name + '_D', self.d_loss)
     def apply_scaling(self,scale):
         if self.config.scale_variant == 0:
             self.d_loss /= scale
@@ -51,8 +45,8 @@ class WMMD(MMD_GAN):
         elif self.config.scale_variant == 1:
             self.d_loss /= scale
         elif self.config.scale_variant == 2:
-            self.d_loss /= (scale+1)
-            self.g_loss /= (scale+1)
+            self.d_loss /= (self.hs*scale+1)
+            self.g_loss /= (self.hs*scale+1)
         elif self.config.scale_variant == 3:
             self.d_loss /= (scale+1)
         print('[*] Adding scale variant %d', self.config.scale_variant)

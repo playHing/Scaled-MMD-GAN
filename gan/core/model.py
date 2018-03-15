@@ -119,6 +119,12 @@ class MMD_GAN(object):
                                       name='gradient_penalty', 
                                       trainable=False, dtype=tf.float32)
                 self.gp_decay_op = self.gp.assign(self.gp * self.config.gp_decay_rate)
+            if self.config.is_train and self.config.hessian_scale:
+                self.hs = tf.Variable(self.config.hessian_scale_coeff, 
+                                      name='hessian_scale_coeff', 
+                                      trainable=False, dtype=tf.float32)
+                self.hs_decay_op = self.hs.assign(self.hs * self.config.hs_decay_rate)
+               
 
         self.set_pipeline()
 
