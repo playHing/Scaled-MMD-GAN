@@ -27,3 +27,40 @@ class WGAN_GP(MMD_GAN):
 
         tf.summary.scalar(self.optim_name + ' G', self.g_loss)
         tf.summary.scalar(self.optim_name + ' D', self.d_loss)
+
+class SWGAN(MMD_GAN):
+    def __init__(self, sess, config, **kwargs):
+        config.dof_dim = 1
+        super(SWGAN, self).__init__(sess, config, **kwargs)
+        
+    def set_loss(self, G, images):
+        interpolates0 = self.images
+        interpolates = self.discriminator(interpolates0, self.batch_size)
+
+        self.d_loss = (tf.reduce_mean(G) - tf.reduce_mean(images))/tf.sqrt( self.hs*tf.reduce_mean(tf.square(interpolates)) + 1)
+        self.g_loss = -self.d_loss
+        self.optim_name = 'SWGAN %d_loss' % int(self.config.gradient_penalty)
+
+        tf.summary.scalar(self.optim_name + ' G', self.g_loss)
+        tf.summary.scalar(self.optim_name + ' D', self.d_loss)
+
+class Squared_SWGAN(MMD_GAN):
+    def __init__(self, sess, config, **kwargs):
+        config.dof_dim = 1
+        super(Squared_SWGAN, self).__init__(sess, config, **kwargs)
+        
+    def set_loss(self, G, images):
+        interpolates0 = self.images
+        interpolates = self.discriminator(interpolates0, self.batch_size)
+
+        self.g_loss = tf.square(tf.reduce_mean(G) - tf.reduce_mean(images))/( self.hs*tf.reduce_mean(tf.square(interpolates))  + 1)
+        self.d_loss = -self.g_loss
+        self.optim_name = 'SWGAN %d_loss' % int(self.config.gradient_penalty)
+
+        tf.summary.scalar(self.optim_name + ' G', self.g_loss)
+        tf.summary.scalar(self.optim_name + ' D', self.d_loss)
+
+
+
+
+
