@@ -33,7 +33,12 @@ parser.add_argument('-is_train',            default=True, type=bool, help='True 
 parser.add_argument('-visualize',           default=False, type=bool, help='True for visualizing, False for nothing [False]')
 parser.add_argument('-is_demo',             default=False, type=bool, help='For testing [False]')
 parser.add_argument('-hessian_scale',       default=False, type=bool, help='For scaling the MMD')
-parser.add_argument('-scale_variant',       default=0, type=int, help='The variant of the scaled MMD')
+parser.add_argument('-hessian_scale_coeff', default=1., type=float, help='coeff of scaling')
+parser.add_argument('-hs_decay_rate',       default=0.5, type=float, help='decay of the scaling factor')
+parser.add_argument('-hs_freq_decay',       default=8000, type=int, help='For scaling the MMD')
+parser.add_argument('-scale_variant',       default=2, type=int, help='The variant of the scaled MMD')
+parser.add_argument('-lr_freq_decay',       default=8000, type=int, help='The variant of the scaled MMD')
+
 parser.add_argument('-gradient_penalty',    default=0.0, type=float, help='Use gradient penalty [0.0]')
 parser.add_argument('-threads',             default=-1, type=int, help='Upper limit for number of threads [np.inf]')
 parser.add_argument('-dsteps',              default=5, type=int, help='Number of discriminator steps in a row [1]')
@@ -70,6 +75,11 @@ def main(_):
         from core.cramer import Cramer_GAN as Model
     elif FLAGS.model == 'wmmd':
         from core.wmmd import WMMD as Model
+    elif FLAGS.model == 'swgan':
+        from core.wgan_gp import SWGAN as Model
+    elif FLAGS.model == 'squared_swgan':
+        from core.wgan_gp import Squared_SWGAN as Model
+
 
     with tf.Session(config=sess_config) as sess:
         #sess = tf_debug.tf_debug.TensorBoardDebugWrapperSession(sess,'localhost:6064')
