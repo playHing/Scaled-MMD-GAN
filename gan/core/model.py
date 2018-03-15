@@ -47,7 +47,7 @@ class MMD_GAN(object):
         self.df_dim = config.df_dim
         self.dof_dim = self.config.dof_dim
 
-        self.c_dim = c_dim            
+        self.c_dim = c_dim
         
         discriminator_desc = '_dc'
         if self.config.learning_rate_D == self.config.learning_rate:
@@ -165,7 +165,7 @@ class MMD_GAN(object):
         self.d_vars = [var for var in t_vars if 'd_' in var.name]
         self.g_vars = [var for var in t_vars if 'g_' in var.name]
 
-        self.saver = tf.train.Saver(max_to_keep=2)
+        self.saver = tf.train.Saver(max_to_keep=20)
             
         print('[*] Model built.')
 
@@ -252,11 +252,7 @@ class MMD_GAN(object):
             #self.d_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
             self.d_grads = self.d_optim.apply_gradients(self.d_gvs) # minimizes self.d_loss <==> max MMD    
         print('[*] Gradients set')
-    
-    def train_step(self, batch_images=None):
-        step = self.sess.run(self.global_step)
-        write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
-                or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
+    def set_counters(self, step):
 
         if (self.g_counter == 0) and (self.d_grads is not None):
             d_steps = self.config.dsteps
@@ -264,54 +260,80 @@ class MMD_GAN(object):
                 d_steps = self.config.start_dsteps
             self.d_counter = (self.d_counter + 1) % (d_steps + 1)
         if self.d_counter == 0:
-            self.g_counter = (self.g_counter + 1) % self.config.gsteps        
+            self.g_counter = (self.g_counter + 1) % self.config.gsteps 
+        
+
+
+    def set_summary(self,step, summary_str, g_loss, d_loss, write_summary):
+        if step % 1000 == 0:
+            try:
+                self.writer.add_summary(summary_str, step)
+                self.err_counter = 0
+            except Exception as e:
+                print('Step %d summary exception. ' % step, e)
+                self.err_counter += 1
+        if write_summary:
+            self.timer(step, "%s, G: %.8f, D: %.8f" % (self.optim_name, g_loss, d_loss))
+            if self.config.L2_discriminator_penalty > 0:
+                print(' ' * 22 + ('Discriminator L2 penalty: %.8f' % self.sess.run(self.d_L2_penalty)))
+
+
+    def set_decay(self, step, is_init = False):
+        if is_init:
+            
+            if (not self.config.MMD_lr_scheduler) and (self.sess.run(self.gp) == self.config.gradient_penalty):
+                lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
+                self.lr *= self.config.decay_rate ** lr_decays_so_far
+                if self.config.gp_decay_rate > 0:
+                    self.gp *= self.config.gp_decay_rate ** lr_decays_so_far
+                    print('current gradient penalty: %f' % self.sess.run(self.gp))
+            print('current learning rate: %f' % self.sess.run(self.lr))
+
+        else:
+            if np.mod(step + 1, self.config.lr_freq_decay) == 0 and self.d_counter == 0:
+                self.sess.run(self.lr_decay_op)
+                print('current learning rate: %f' % self.sess.run(self.lr))
+                if (self.config.gp_decay_rate > 0) and (self.config.gradient_penalty > 0):
+                    self.sess.run(self.gp_decay_op)
+                    print('current gradient penalty: %f' % self.sess.run(self.gp))
+            if self.d_counter == 0 and np.mod(step + 1, self.config.hs_freq_decay) == 0:
+                if (self.config.hs_decay_rate > 0) and self.config.hessian_scale:
+                    self.sess.run(self.hs_decay_op)
+
+    def train_step(self, batch_images=None):
+        step = self.sess.run(self.global_step)
+
+        self.set_counters(step)
+        write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
+                or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
 
         eval_ops = [self.g_gvs, self.d_gvs, self.g_loss, self.d_loss]
-        #g_grads_0,g_loss_0,G_img,img = self.sess.run([self.g_gvs, self.g_loss, self.d_G, self.d_images])
+
         if self.config.is_demo:
             summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
                 [self.TrainSummary] + eval_ops
-            )
+            )  
         else:
             if self.d_counter == 0:
                 if write_summary:
                     _, summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
                         [self.g_grads, self.TrainSummary] + eval_ops
                     )
+                      
                 else:
                     _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.g_grads] + eval_ops)
             else:
                 _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
             et = self.timer(step, "g step" if (self.d_counter == 0) else "d step", False)
 
-
-        if np.isinf(g_loss) or np.isnan(g_loss):
-            print("Inf g_loss, epoch: ")
-        
         assert ~np.isnan(g_loss), et + "NaN g_loss, epoch: "
         assert ~np.isnan(d_loss), et + "NaN d_loss, epoch: "
-        # if G STEP, after D steps
-        if self.d_counter == 0:
-            if step % 1000 == 0:
-                try:
-                    self.writer.add_summary(summary_str, step)
-                    self.err_counter = 0
-                except Exception as e:
-                    print('Step %d summary exception. ' % step, e)
-                    self.err_counter += 1
-            if write_summary:
-                self.timer(step, "%s, G: %.8f, D: %.8f" % (self.optim_name, g_loss, d_loss))
-                if self.config.L2_discriminator_penalty > 0:
-                    print(' ' * 22 + ('Discriminator L2 penalty: %.8f' % self.sess.run(self.d_L2_penalty)))
-            if np.mod(step + 1, self.config.max_iteration//5) == 0:
-                if not self.config.MMD_lr_scheduler:
-#                    self.lr *= self.config.decay_rate
-                    self.sess.run(self.lr_decay_op)
-                    print('current learning rate: %f' % self.sess.run(self.lr))
-                if (self.config.gp_decay_rate > 0) and (self.config.gradient_penalty > 0):
-                    self.sess.run(self.gp_decay_op)
-                    print('current gradient penalty: %f' % self.sess.run(self.gp))
+
         
+        if self.d_counter == 0:
+            if write_summary:
+                self.set_summary(step, summary_str, g_loss, d_loss,write_summary)  
+            self.set_decay(step)
             if self.config.compute_scores:
                 self.scorer.compute(self, step)
         return g_loss, d_loss, step
@@ -337,19 +359,13 @@ class MMD_GAN(object):
                                   self.sess.run(self.lr)))
         else:
             print(" [!] Load failed...")
-#        self.sess.run(self.lr.assign(self.config.learning_rate))
-        if (not self.config.MMD_lr_scheduler) and (self.sess.run(self.gp) == self.config.gradient_penalty):
-            step = self.sess.run(self.global_step)
-            lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
-            self.lr *= self.config.decay_rate ** lr_decays_so_far
-            if self.config.gp_decay_rate > 0:
-                self.gp *= self.config.gp_decay_rate ** lr_decays_so_far
-                print('current gradient penalty: %f' % self.sess.run(self.gp))
-        print('current learning rate: %f' % self.sess.run(self.lr))    
-        
+        self.sess.run(self.lr.assign(self.config.learning_rate))
+        step = self.sess.run(self.global_step)
+
+        self.set_decay(step, is_init = True)
+
         print('[*] Model initialized for training')
-            
-            
+
     def set_pipeline(self):
         Pipeline = get_pipeline(self.dataset, self.config.suffix)
         pipe = Pipeline(self.output_size, self.c_dim, self.real_batch_size, 
@@ -398,8 +414,9 @@ class MMD_GAN(object):
 
 
     def save_checkpoint_and_samples(self, step, freq=1000):
-        if (np.mod(step, freq) == 0) and (self.d_counter == 0):
+        if (np.mod(step, 5*freq) == 0) and (self.d_counter == 0):
             self.save_checkpoint(step)
+        if (np.mod(step, freq) == 0) and (self.d_counter == 0):
             samples = self.sess.run(self.sampler)
             self._ensure_dirs('sample')
             p = os.path.join(self.sample_dir, 'train_{:02d}.png'.format(step))
