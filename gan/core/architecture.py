@@ -10,7 +10,7 @@ from core.ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from utils.misc import conv_sizes
 # Generators
 
-class Generator:
+class Generator(object):
     def __init__(self, dim, c_dim, output_size, use_batch_norm, prefix='g_'):
         self.used = False
         self.dim = dim
@@ -117,7 +117,7 @@ class ResNetGenerator(Generator):
 
 # Discriminator
 
-class Discriminator:
+class Discriminator(object):
     def __init__(self, dim, o_dim, use_batch_norm, prefix='d_'):
         self.dim = dim
         self.o_dim = o_dim 
@@ -207,6 +207,25 @@ class ResNetDiscriminator(Discriminator):
         hF = linear(hF, self.o_dim, self.prefix + 'h5_lin')
     
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}  
+
+
+class InjectiveDiscriminator(Discriminator):
+    def __init__(self, net):
+        self.net = net
+        self.scale_id_layer = 1.
+        super(InjectiveDiscriminator,self).__init__(net.dim, net.o_dim, False, prefix=net.prefix)
+
+    def network(self, image, batch_size):
+        layers = self.net.network(image, batch_size)
+        id_layer_0 = tf.reshape(image, [batch_size, -1])
+        init_value  = 1./(id_layer_0.get_shape().as_list()[-1])
+        self.scale_id_layer = tf.get_variable(name=self.prefix+'scale_id_layer', shape =  [1],initializer = tf.constant_initializer(init_value) ,  trainable=True,dtype=tf.float32)
+        id_layer =id_layer_0*self.scale_id_layer
+        hF = tf.concat([layers['hF'], id_layer], 1)
+        layers['hF'] = hF
+        return layers
+
+
 
         
 def get_networks(architecture):

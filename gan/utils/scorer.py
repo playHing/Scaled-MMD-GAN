@@ -43,7 +43,20 @@ class Scorer(object):
         while len(ims) < self.size // gan.batch_size:
             ims.append(gan.sess.run(gan.images))
         ims = np.concatenate(ims, axis=0)[:self.size]
-        _, self.train_codes = cs.featurize(ims * 255., self.model, get_preds=True, 
+        if self.dataset == 'mnist': #LeNet model takes [-.5, .5] pics
+            ims -= .5
+            if (ims.max() > .5) or (ims.min() < -.5):
+                print('WARNING! LeNet min/max violated: min = %f, max = %f. Clipping values.' % (ims.min(), ims.max()))
+                ims = ims.clip(-.5, .5)
+        else:
+            ims *= 255.0
+            if (ims.max() > 255.) or (ims.min() < .0):
+                print('WARNING! Inception min/max violated: min = %f, max = %f. Clipping values.' % (ims.min(), ims.max()))
+                ims = ims.clip(0., 255.)
+
+
+
+        _, self.train_codes = cs.featurize(ims, self.model, get_preds=True, 
                                            get_codes=True, output=self.stdout)
         np.save(path, self.train_codes)
         print('[*] %d train images featurized and saved in <%s>' % (self.size, path))
@@ -101,10 +114,8 @@ class Scorer(object):
 
         
         if self.lr_scheduler:
-            n = 10
-            if self.dataset == 'mnist':
-                n = 10
-            nc = 3
+            n = 1
+            nc = 1
             bs = 2048
             new_Y = codes[:bs]
             X = self.train_codes[:bs]

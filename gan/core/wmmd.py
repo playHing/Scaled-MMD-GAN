@@ -24,14 +24,20 @@ class WMMD(MMD_GAN):
 
 
         bs = min([self.batch_size, self.real_batch_size])
-        alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
+        #alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
         x_hat_data = self.images[:bs]
         x_hat = self.discriminator(x_hat_data, bs)
-        grad_x_hat = tf.gradients(x_hat, [x_hat_data])
-        scale = tf.reduce_mean( tf.reduce_sum( tf.square(grad_x_hat), axis = [1,2,3]) )
+        if self.config.d_is_injective:
+            grad_x_hat = tf.gradients(x_hat[:,:-self.input_dim ], [x_hat_data])
+            scale = tf.reduce_mean( tf.reduce_sum( tf.square(grad_x_hat), axis = [1,2,3])  + tf.square(self.discriminator.scale_id_layer)*self.input_dim )
+        else:
+            grad_x_hat = tf.gradients(x_hat, [x_hat_data])
+            scale = tf.reduce_mean( tf.reduce_sum( tf.square(grad_x_hat), axis = [1,2,3]) )
         unscaled_g_loss = 1*self.g_loss
         with tf.variable_scope('loss'):
             if self.config.hessian_scale:
+                if self.config.d_is_injective:
+                    tf.summary.scalar(self.optim_name + 'id_scale', tf.reduce_mean(self.discriminator.scale_id_layer))
                 tf.summary.scalar(self.optim_name + '_unscaled_G', unscaled_g_loss)
                 self.apply_scaling(scale)
                 tf.summary.scalar('dx_scale', scale)
@@ -48,7 +54,8 @@ class WMMD(MMD_GAN):
             self.d_loss /= (self.hs*scale+1)
             self.g_loss /= (self.hs*scale+1)
         elif self.config.scale_variant == 3:
-            self.d_loss /= (scale+1)
+            self.d_loss /= tf.maximum(self.hs*scale+1, 4.)
+            self.g_loss /= tf.maximum(self.hs*scale+1, 4.)
         print('[*] Adding scale variant %d', self.config.scale_variant)
 
 

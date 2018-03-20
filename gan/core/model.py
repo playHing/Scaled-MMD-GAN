@@ -2,7 +2,7 @@ from __future__ import division, print_function
 import os, sys, time, pprint, numpy as np
 from . import  mmd
 from .ops import safer_norm, tf
-from .architecture import get_networks
+from .architecture import get_networks, InjectiveDiscriminator
 from .pipeline import get_pipeline
 from utils import timer, scorer, misc 
 
@@ -48,6 +48,7 @@ class MMD_GAN(object):
         self.dof_dim = self.config.dof_dim
 
         self.c_dim = c_dim
+        self.input_dim = self.output_size*self.output_size*self.c_dim
         
         discriminator_desc = '_dc'
         if self.config.learning_rate_D == self.config.learning_rate:
@@ -137,7 +138,10 @@ class MMD_GAN(object):
         Generator, Discriminator = get_networks(self.config.architecture)
         generator = Generator(self.gf_dim, self.c_dim, self.output_size, self.config.batch_norm)
         dbn = self.config.batch_norm & (self.config.gradient_penalty <= 0)
-        self.discriminator = Discriminator(self.df_dim, self.dof_dim, dbn)
+        if self.config.d_is_injective:
+            self.discriminator = InjectiveDiscriminator(Discriminator(self.df_dim, self.dof_dim, dbn))
+        else:
+            self.discriminator = Discriminator(self.df_dim, self.dof_dim, dbn)
         # tf.summary.histogram("z", self.z)
 
         self.G = generator(self.z, self.batch_size)
@@ -281,14 +285,16 @@ class MMD_GAN(object):
     def set_decay(self, step, is_init = False):
         if is_init:
             
-            if (not self.config.MMD_lr_scheduler) and (self.sess.run(self.gp) == self.config.gradient_penalty):
-                lr_decays_so_far = int((step * 5.)/self.config.max_iteration)
-                self.lr *= self.config.decay_rate ** lr_decays_so_far
-                if self.config.gp_decay_rate > 0:
-                    self.gp *= self.config.gp_decay_rate ** lr_decays_so_far
-                    print('current gradient penalty: %f' % self.sess.run(self.gp))
-            print('current learning rate: %f' % self.sess.run(self.lr))
+            lr_decays_so_far = int((step )/self.config.lr_freq_decay)
+            self.lr *= self.config.decay_rate ** lr_decays_so_far
+            if self.config.gp_decay_rate > 0 and self.config.gradient_penalty >0:
+                self.gp *= self.config.gp_decay_rate ** lr_decays_so_far
+                print('current gradient penalty: %f' % self.sess.run(self.gp))
 
+            hs_decays_so_far = int((step )/self.config.hs_freq_decay)
+            self.hs *= self.config.hs_decay_rate ** hs_decays_so_far  
+            print('current hs learning rate: %f' % self.sess.run(self.hs))
+            print('current learning rate: %f' % self.sess.run(self.lr))
         else:
             if np.mod(step + 1, self.config.lr_freq_decay) == 0 and self.d_counter == 0:
                 self.sess.run(self.lr_decay_op)

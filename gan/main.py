@@ -38,6 +38,7 @@ parser.add_argument('-hs_decay_rate',       default=0.5, type=float, help='decay
 parser.add_argument('-hs_freq_decay',       default=8000, type=int, help='For scaling the MMD')
 parser.add_argument('-scale_variant',       default=2, type=int, help='The variant of the scaled MMD')
 parser.add_argument('-lr_freq_decay',       default=8000, type=int, help='The variant of the scaled MMD')
+parser.add_argument('-d_is_injective',       default=False, type=bool, help='Ensures the discriminator network is injective by adding the input to the feature')
 
 parser.add_argument('-gradient_penalty',    default=0.0, type=float, help='Use gradient penalty [0.0]')
 parser.add_argument('-threads',             default=-1, type=int, help='Upper limit for number of threads [np.inf]')
@@ -46,7 +47,7 @@ parser.add_argument('-gsteps',              default=1, type=int, help='Number of
 parser.add_argument('-start_dsteps',        default=10, type=int, help='Number of discrimintor steps in a row during first 20 steps and every 100th step [1]')
 parser.add_argument('-df_dim',              default=64, type=int, help='Discriminator no of channels at first conv layer [64]')
 parser.add_argument('-dof_dim',             default=16, type=int, help='No of discriminator output features [16]')
-parser.add_argument('-gf_dim',              default=61, type=int, help='No of generator channels [64]')
+parser.add_argument('-gf_dim',              default=64, type=int, help='No of generator channels [64]')
 parser.add_argument('-batch_norm',          default=True, type=bool, help='Use of batch norm [False] (always False for discriminator if gradient_penalty > 0)')
 parser.add_argument('-log',                 default=True, type=bool, help='Wheather to write log to a file in samples directory [True]')
 parser.add_argument('-compute_scores',      default=False, type=bool, help='Compute scores')
