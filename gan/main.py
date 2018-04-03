@@ -59,13 +59,14 @@ def main(_):
         
     else:
         sess_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
-    if 'mmd' in FLAGS.model:
-        from core.model import MMD_GAN as Model
+    if 'smmd' in FLAGS.model:
+        from core.model import SMMD_GAN as Model
+    elif 'mmd' in FLAGS.model:
+        from core.model import MMD_GAN as Model        
     elif FLAGS.model == 'wgan_gp':
         from core.wgan_gp import WGAN_GP as Model
     elif 'cramer' in FLAGS.model:
         from core.cramer import Cramer_GAN as Model
-
         
     with tf.Session(config=sess_config) as sess:
         if FLAGS.dataset == 'mnist':
