@@ -60,7 +60,7 @@ def main(_):
     else:
         sess_config = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
     if 'smmd' in FLAGS.model:
-        from core.model import SMMD_GAN as Model
+        from core.smmd import SMMD_GAN as Model
     elif 'mmd' in FLAGS.model:
         from core.model import MMD_GAN as Model        
     elif FLAGS.model == 'wgan_gp':
