@@ -353,6 +353,10 @@ class MMD_GAN(object):
             if self.config.L2_discriminator_penalty > 0:
                 print(' ' * 22 + ('Discriminator L2 penalty: %.8f' % self.sess.run(self.d_L2_penalty)))
 
+    def do_decay(self):
+        self.sess.run(self.lr_decay_op)
+        if self.config.hessian_scale:
+            self.sess.run(self.hs_decay_op)
 
     def set_decay(self, step, is_init = False):
         if is_init:
