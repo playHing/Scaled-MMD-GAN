@@ -38,9 +38,9 @@ class WMMD(MMD_GAN):
             if self.config.hessian_scale:
                 if self.config.d_is_injective:
                     tf.summary.scalar(self.optim_name + 'id_scale', tf.reduce_mean(self.discriminator.scale_id_layer))
-                tf.summary.scalar(self.optim_name + '_unscaled_G', unscaled_g_loss)
-                self.apply_scaling(scale)
-                tf.summary.scalar('dx_scale', scale)
+                tf.summary.scalar(self.optim_name + '_unscaled_G', self.unscaled_g_loss)
+                self.apply_scaling(avg_norme2_jac,self.norm_discriminator)
+                tf.summary.scalar('dx_scale', avg_norme2_jac)
                 print('[*] Hessian Scaling added')
                 tf.summary.scalar(self.optim_name + '_G', self.g_loss)
                 tf.summary.scalar(self.optim_name + '_D', self.d_loss)
