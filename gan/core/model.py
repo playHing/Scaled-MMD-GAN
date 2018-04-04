@@ -494,13 +494,16 @@ class MMD_GAN(object):
 
     def load_checkpoint(self):
         print(" [*] Reading checkpoints...")
-        ckpt = tf.train.get_checkpoint_state(self.checkpoint_dir)
-        if ckpt and ckpt.model_checkpoint_path:
-            ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
-            self.saver.restore(self.sess, os.path.join(self.checkpoint_dir, ckpt_name))
-            return True
+        if self.config.ckpt_name:
+            ckpt_name = self.config.ckpt_name
         else:
-            return False
+            ckpt = tf.train.get_checkpoint_state(self.checkpoint_dir)
+            if ckpt and ckpt.model_checkpoint_path:
+                ckpt_name = os.path.basename(ckpt.model_checkpoint_path)
+            else:
+                return False
+        self.saver.restore(self.sess, os.path.join(self.checkpoint_dir, ckpt_name))
+        return True
 
 
     def save_checkpoint_and_samples(self, step, freq=1000):
