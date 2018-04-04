@@ -25,7 +25,17 @@ class WMMD(MMD_GAN):
 
         bs = min([self.batch_size, self.real_batch_size])
         #alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
-        x_hat_data = self.images[:bs]
+        if self.config.grad_expectation == 0:
+            x_hat_data = self.images[:bs]
+        elif self.config.grad_expectation == 1:
+            x_hat_data = self.G[:bs]
+        elif self.config.grad_expectation == 2:
+            alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
+            x_hat_data =  (1. - alpha) * self.images[:bs] + alpha * self.G[:bs]
+        elif self.config.grad_expectation == 3:
+            alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
+            x_hat_data =  tf.boolean_mask(self.images[:bs],(alpha<0.5))  + tf.boolean_mask(self.G[:bs],(alpha>=0.5))
+        x_hat_data = tf.stop_gradient(x_hat_data)
         x_hat = self.discriminator(x_hat_data, bs)
         if self.config.d_is_injective:
             grad_x_hat = tf.gradients(x_hat[:,:-self.input_dim ], [x_hat_data])
