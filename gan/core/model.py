@@ -356,16 +356,20 @@ class MMD_GAN(object):
 
     def set_decay(self, step, is_init = False):
         if is_init:
-            
-            lr_decays_so_far = int((step )/self.config.lr_freq_decay)
-            self.lr *= self.config.decay_rate ** lr_decays_so_far
+            if not self.config.restart_lr:
+                lr_decays_so_far = int((step )/self.config.lr_freq_decay)
+                self.lr *= self.config.decay_rate ** lr_decays_so_far
             if self.config.gp_decay_rate > 0 and self.config.gradient_penalty >0:
                 self.gp *= self.config.gp_decay_rate ** lr_decays_so_far
                 print('current gradient penalty: %f' % self.sess.run(self.gp))
+            if self.config.hessian_scale and not self.config.restart_hs:
+                hs_decays_so_far = int((step )/self.config.hs_freq_decay)
+                self.hs *= self.config.hs_decay_rate ** hs_decays_so_far  
+                print('current hs learning rate: %f' % self.sess.run(self.hs))
+            if self.config.restart_hs:
+                self.sess.run(self.hs.assign(self.config.hessian_scale_coeff))
+                print('current hs learning rate: %f' % self.sess.run(self.hs))
 
-            hs_decays_so_far = int((step )/self.config.hs_freq_decay)
-            self.hs *= self.config.hs_decay_rate ** hs_decays_so_far  
-            print('current hs learning rate: %f' % self.sess.run(self.hs))
             print('current learning rate: %f' % self.sess.run(self.lr))
         else:
             if np.mod(step + 1, self.config.lr_freq_decay) == 0 and self.d_counter == 0:
