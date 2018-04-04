@@ -522,9 +522,9 @@ class MMD_GAN(object):
 
 
     def save_checkpoint_and_samples(self, step, freq=1000):
-        if (np.mod(step, 5*freq) == 0) and (self.d_counter == 0):
+        if (np.mod(step, self.config.checkpoint_freq) == 0) and (self.d_counter == 0):
             self.save_checkpoint(step)
-        if (np.mod(step, freq) == 0) and (self.d_counter == 0):
+        if (np.mod(step, self.config.sample_freq) == 0) and (self.d_counter == 0):
             samples = self.sess.run(self.sampler)
             self._ensure_dirs('sample')
             p = os.path.join(self.sample_dir, 'train_{:02d}.png'.format(step))
