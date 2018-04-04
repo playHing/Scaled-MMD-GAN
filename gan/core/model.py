@@ -422,6 +422,10 @@ class MMD_GAN(object):
       
 
     def train_init(self):
+        #set_grads(self, clip_gradient = True)
+        #if self.config.hessian_scale:
+        #    self.set_ratio_loss_grads()
+        #else:
         self.set_grads()
 
         self.sess.run(tf.local_variables_initializer())
