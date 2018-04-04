@@ -37,12 +37,17 @@ class SWGAN(MMD_GAN):
         interpolates0 = self.images
         interpolates = self.discriminator(interpolates0, self.batch_size)
 
-        self.d_loss = (tf.reduce_mean(G) - tf.reduce_mean(images))/tf.sqrt( self.hs*tf.reduce_mean(tf.square(interpolates)) + 1)
+        self.unscaled_d_loss = tf.reduce_mean(G) - tf.reduce_mean(images)
+        self.unscaled_g_loss = -self.unscaled_d_loss
+        self.scale = tf.sqrt( self.hs*tf.reduce_mean(tf.square(interpolates)) + 1)
+        self.d_loss = self.unscaled_d_loss/self.scale
         self.g_loss = -self.d_loss
         self.optim_name = 'SWGAN %d_loss' % int(self.config.gradient_penalty)
 
         tf.summary.scalar(self.optim_name + ' G', self.g_loss)
         tf.summary.scalar(self.optim_name + ' D', self.d_loss)
+        tf.summary.scalar(self.optim_name + '_unscaled_G', self.unscaled_g_loss)
+        tf.summary.scalar('dx_scale', self.scale)
 
 class Squared_SWGAN(MMD_GAN):
     def __init__(self, sess, config, **kwargs):
