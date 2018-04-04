@@ -57,6 +57,7 @@ parser.add_argument('-gpu_mem',             default=.9, type=float, help="GPU me
 parser.add_argument('-no_of_samples',       default=100000, type=int, help="number of samples to produce")
 parser.add_argument('-save_layer_outputs',  default=0, type=int, help="Wheather to save_layer_outputs. If == 2, saves outputs at exponential steps: 1, 2, 4, ..., 512 and every 1000. [0, 1, 2]")
 parser.add_argument('-L2_discriminator_penalty',default=0.0, type=float, help="L2 penalty on discriminator features [0.0]")
+parser.add_argument('-checkpoint_freq',     default=5000, type=int, help="L2 penalty on discriminator features [0.0]")
 FLAGS = parser.parse_args()   
 
 def main(_):

@@ -169,7 +169,7 @@ class MMD_GAN(object):
         self.d_vars = [var for var in t_vars if 'd_' in var.name]
         self.g_vars = [var for var in t_vars if 'g_' in var.name]
 
-        self.saver = tf.train.Saver(max_to_keep=20)
+        self.saver = tf.train.Saver(max_to_keep=self.config.max_to_keep)
             
         print('[*] Model built.')
 
