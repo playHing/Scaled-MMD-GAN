@@ -44,24 +44,27 @@ class WMMD(MMD_GAN):
                 print('[*] Hessian Scaling added')
                 tf.summary.scalar(self.optim_name + '_G', self.g_loss)
                 tf.summary.scalar(self.optim_name + '_D', self.d_loss)
-    def apply_scaling(self,scale):
+                tf.summary.scalar(self.optim_name + '_norm_D', self.norm_discriminator)
+    def apply_scaling(self,scale,norm):
         if self.config.scale_variant == 0:
-            self.d_loss /= scale
-            self.g_loss /= scale
-        elif self.config.scale_variant == 1:
-            self.d_loss /= scale
+            epsilon = 0.00000001
+            self.scale= (self.hs*scale + epsilon)
+
         elif self.config.scale_variant == 2:
-            self.d_loss /= (self.hs*scale+1)
-            self.g_loss /= (self.hs*scale+1)
+            self.scale= 1./(self.hs*scale+1.)
         elif self.config.scale_variant == 3:
-            self.d_loss /= tf.maximum(self.hs*scale+1, 4.)
-            self.g_loss /= tf.maximum(self.hs*scale+1, 4.)
+            self.scale= 1./(tf.maximum(self.hs*scale+1, 4.))
+        elif self.config.scale_variant == 4:
+            epsilon = 0.00000001
+            self.scale= 1+1./(self.hs*scale+epsilon)
+        elif self.config.scale_variant == 6:
+            self.scale= 1+1./(self.hs*scale+1)
+        elif self.config.scale_variant == 8:
+            self.scale= 1./(self.hs*(scale + norm) +1)
+
+        self.g_loss = self.g_loss*self.scale
+        self.d_loss = -self.g_loss
         print('[*] Adding scale variant %d', self.config.scale_variant)
-
-
-
-
-
 
 
 
