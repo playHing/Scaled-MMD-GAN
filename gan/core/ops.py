@@ -181,3 +181,10 @@ def dot(x, y, name=None):
         y.get_shape().assert_has_rank(1)
 
         return tf.squeeze(tf.matmul(tf.expand_dims(x, 0), tf.expand_dims(y, 1)))
+
+def squared_norm_jacobian(y, x):
+    d = y.shape.as_list()[1]
+    norm_gradients = tf.stack(
+        [tf.reduce_sum( tf.square(tf.gradients(y[:,i], x)[0]), axis = [1,2,3]) for i  in range(d)])
+    norm2_jac =  tf.reduce_sum(norm_gradients,axis = 0)
+    return norm2_jac
