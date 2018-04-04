@@ -228,7 +228,58 @@ class MMD_GAN(object):
             self.optim_name = self.optim_name.replace(') (', ', ')
             tf.summary.scalar('L2_disc_penalty', self.d_L2_penalty)
             print('[*] L2 discriminator penalty added')
-        
+    
+    def set_ratio_loss_grads(self):
+        with tf.variable_scope("G_grads"):
+            self.g_optim = tf.train.AdamOptimizer(self.lr, beta1=self.config.beta1, beta2=0.9)
+            self.g_gvs_0 = self.g_optim.compute_gradients(
+                loss=self.unscaled_g_loss,
+                var_list=self.g_vars
+            )
+            self.g_gvs = [(gg*self.scale, vv) for gg, vv in self.g_gvs_0]
+
+            self.g_grads_unclipped = self.g_optim.apply_gradients(
+                self.g_gvs, 
+                global_step=self.global_step
+            ) # minimizes self.g_loss <==> minimizes MMD
+
+            self.g_gvs_clipped = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.g_gvs]
+            self.g_grads_clipped = self.g_optim.apply_gradients(
+                self.g_gvs_clipped, 
+                global_step=self.global_step
+            )
+            self.g_grads = self.g_grads_clipped
+
+        with tf.variable_scope("D_grads"):
+            self.d_optim = tf.train.AdamOptimizer(
+                self.lr * self.config.learning_rate_D / self.config.learning_rate, 
+                beta1=self.config.beta1, beta2=0.9
+            )
+            self.d_gvs_0 = self.d_optim.compute_gradients(
+                loss=self.unscaled_d_loss, 
+                var_list=self.d_vars
+            )
+
+            self.d_scale_gvs = self.d_optim.compute_gradients(
+                loss=self.scale, 
+                var_list=self.d_vars
+            )
+            def apply_ratio_loss_grads(gg, gg_scale):
+                if gg_scale is None:
+                    return gg *self.scale
+                else:
+                    return gg *self.scale + gg_scale * (self.unscaled_d_loss)
+
+
+            self.d_gvs = [ (  apply_ratio_loss_grads(gg, gg_scale), vv )  for (gg, vv), (gg_scale, _) in zip(self.d_gvs_0,self.d_scale_gvs)]
+
+            # negative gradients not needed - by definition d_loss = -optim_loss
+            self.d_grads_unclipped = self.d_optim.apply_gradients(self.d_gvs)
+            self.d_gvs_clipped = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
+            self.d_grads_clipped = self.d_optim.apply_gradients(self.d_gvs_clipped) 
+            self.d_grads = self.d_grads_clipped
+            # minimizes self.d_loss <==> max MMD   
+        print('[*] Optimized Gradients for ratio loss set')
         
     def set_grads(self):
         with tf.variable_scope("G_grads"):
@@ -236,12 +287,20 @@ class MMD_GAN(object):
             self.g_gvs = self.g_optim.compute_gradients(
                 loss=self.g_loss,
                 var_list=self.g_vars
-            )       
-            #self.g_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.g_gvs]
-            self.g_grads = self.g_optim.apply_gradients(
+            )
+
+            self.g_grads_unclipped = self.g_optim.apply_gradients(
                 self.g_gvs, 
                 global_step=self.global_step
             ) # minimizes self.g_loss <==> minimizes MMD
+
+
+            self.g_gvs_clipped = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.g_gvs]
+            self.g_grads_clipped = self.g_optim.apply_gradients(
+                self.g_gvs_clipped, 
+                global_step=self.global_step
+            )
+            self.g_grads = self.g_grads_clipped
 
         with tf.variable_scope("D_grads"):
             self.d_optim = tf.train.AdamOptimizer(
@@ -253,9 +312,22 @@ class MMD_GAN(object):
                 var_list=self.d_vars
             )
             # negative gradients not needed - by definition d_loss = -optim_loss
-            #self.d_gvs = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
-            self.d_grads = self.d_optim.apply_gradients(self.d_gvs) # minimizes self.d_loss <==> max MMD    
+            self.d_grads_unclipped = self.d_optim.apply_gradients(self.d_gvs)
+            self.d_gvs_clipped = [(tf.clip_by_norm(gg, 1.), vv) for gg, vv in self.d_gvs]
+            self.d_grads_clipped = self.d_optim.apply_gradients(self.d_gvs_clipped) 
+            self.d_grads = self.d_grads_clipped
+            # minimizes self.d_loss <==> max MMD    
         print('[*] Gradients set')
+    def set_clipping(self, clip = True):
+        if clip:
+            self.d_grads = self.d_grads_clipped
+            self.g_grads = self.g_grads_clipped
+        else:
+            self.d_grads = self.d_grads_unclipped
+            self.g_grads = self.g_grads_unclipped
+
+
+
     def set_counters(self, step):
 
         if (self.g_counter == 0) and (self.d_grads is not None):
