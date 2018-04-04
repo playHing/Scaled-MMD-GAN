@@ -465,15 +465,30 @@ class MMD_GAN(object):
 
             
     def train(self):    
-        self.train_init()
+        step = self.train_init()
 
         coord = tf.train.Coordinator()
         threads = tf.train.start_queue_runners(sess=self.sess, coord=coord)        
-        step = 0
-        
-        print('[ ] Training ... ')
+        if step > self.config.clipping_iter:
+            self.set_clipping(True)
+        else:
+            self.set_clipping(False)
+            print('[ ] Training without clipping ... ')
+            while step <= self.config.clipping_iter:
+                if self.config.simultaneous_update:
+                    g_loss, d_loss, step = self._train_step_simultaneous_update()
+                else:
+                    g_loss, d_loss, step = self.train_step()
+                self.save_checkpoint_and_samples(step)
+                if self.config.save_layer_outputs:
+                    self.save_layers(step)         
+        self.set_clipping(True)
+        print('[ ] Training with clipped gradients... ')
         while step <= self.config.max_iteration:
-            g_loss, d_loss, step = self.train_step()
+            if self.config.simultaneous_update:
+                g_loss, d_loss, step = self._train_step_simultaneous_update()
+            else:
+                g_loss, d_loss, step = self.train_step()
             self.save_checkpoint_and_samples(step)
             if self.config.save_layer_outputs:
                 self.save_layers(step)            
