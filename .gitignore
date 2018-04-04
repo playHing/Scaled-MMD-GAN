@@ -99,3 +99,5 @@ old_exp/
 log_mmd/
 lenet/
 
+# DSstore files
+*.DS_Store
