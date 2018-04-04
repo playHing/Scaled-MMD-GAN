@@ -494,11 +494,14 @@ class MMD_GAN(object):
         else:
             print(" [!] Load failed...")
         self.sess.run(self.lr.assign(self.config.learning_rate))
+
         step = self.sess.run(self.global_step)
+
 
         self.set_decay(step, is_init = True)
 
         print('[*] Model initialized for training')
+        return step
 
     def set_pipeline(self):
         Pipeline = get_pipeline(self.dataset, self.config.suffix)
