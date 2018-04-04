@@ -38,12 +38,14 @@ class WMMD(MMD_GAN):
         x_hat_data = tf.stop_gradient(x_hat_data)
         x_hat = self.discriminator(x_hat_data, bs)
         if self.config.d_is_injective:
-            grad_x_hat = tf.gradients(x_hat[:,:-self.input_dim ], [x_hat_data])
-            scale = tf.reduce_mean( tf.reduce_sum( tf.square(grad_x_hat), axis = [1,2,3])  + tf.square(self.discriminator.scale_id_layer)*self.input_dim )
+            norme2_jac = squared_norm_jacobian(x_hat[:,:-self.input_dim ], x_hat_data)
+            avg_norme2_jac = tf.reduce_mean( norme2_jac  + tf.square(self.discriminator.scale_id_layer)*self.input_dim )
         else:
-            grad_x_hat = tf.gradients(x_hat, [x_hat_data])
-            scale = tf.reduce_mean( tf.reduce_sum( tf.square(grad_x_hat), axis = [1,2,3]) )
-        unscaled_g_loss = 1*self.g_loss
+            norme2_jac = squared_norm_jacobian(x_hat, x_hat_data)
+            avg_norme2_jac = tf.reduce_mean( norme2_jac )
+        self.unscaled_g_loss = 1.*self.g_loss
+        self.unscaled_d_loss = 1.*self.d_loss
+        self.norm_discriminator = tf.reduce_mean(tf.square( x_hat ))
         with tf.variable_scope('loss'):
             if self.config.hessian_scale:
                 if self.config.d_is_injective:
