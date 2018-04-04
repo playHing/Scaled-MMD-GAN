@@ -107,11 +107,6 @@ class Scorer(object):
                 print('Saving BEST model (so far)')
                 gan.save_checkpoint()
         self.output.append(output)
-                
-        
-        filepath = os.path.join(gan.sample_dir, 'score%d.npz' % step)
-        np.savez(filepath, **output)
-
         
         if self.lr_scheduler:
             n =  gan.config.MMD_sdlr_past_sample
@@ -131,17 +126,26 @@ class Scorer(object):
                     self.three_sample_chances += 1
                     if self.three_sample_chances >= nc:
                         # no confidence that new Y sample is closer to X than old Z is
-                        gan.sess.run(gan.lr_decay_op)
+                        gan.do_decay()
                         print('No improvement in last %d tests. Decreasing learning rate to %f' % \
                               (nc, gan.sess.run(gan.lr)))
+                        if gan.config.hessian_scale:
+                             print(' Decreasing scaling amplitude to %f' % \
+                              gan.sess.run(gan.hs))
                         self.three_sample = (self.three_sample + [Y_related_sums])[-nc:] # reset memorized sums
                         self.three_sample_chances = 0
                     else:
                         print('No improvement in last %d test(s). Keeping learning rate at %f' % \
                               (self.three_sample_chances, gan.sess.run(gan.lr)))
+                        if gan.config.hessian_scale:
+                             print(' Keeping scaling amplitude to %f' % \
+                              gan.sess.run(gan.hs))
                 else:
                     # we're confident that new_Y is better than old_Z is
                     print('Keeping learning rate at %f' % gan.sess.run(gan.lr))
+                    if gan.config.hessian_scale:
+                        print(' Keeping scaling amplitude to %f' % \
+                              gan.sess.run(gan.hs))
                     self.three_sample = self.three_sample[1:] + [Y_related_sums]
                     self.three_sample_chances = 0
             else: # add new sums to memory
@@ -150,5 +154,13 @@ class Scorer(object):
                 )
                 gan.timer(step, "computing stats for 3-sample test finished")    
                 print('current learning rate: %f' % gan.sess.run(gan.lr))
-                
+                if gan.config.hessian_scale:
+                        print(' current scaling amplitude to %f' % \
+                              gan.sess.run(gan.hs ))
+        filepath = os.path.join(gan.sample_dir, 'score%d.npz' % step)
+
+        output['lr'] = np.array([gan.sess.run(gan.lr)])
+        output['hs'] = np.array([gan.sess.run(gan.hs)])
+
+        np.savez(filepath, **output)
         gan.timer(step, "Scoring end, total time = %.1f s" % (time.time() - tt))
