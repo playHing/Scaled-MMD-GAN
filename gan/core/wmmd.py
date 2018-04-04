@@ -1,6 +1,6 @@
 from .model import MMD_GAN, tf
 from . import  mmd
-from .ops import safer_norm, tf
+from .ops import safer_norm, tf, squared_norm_jacobian
 
 class WMMD(MMD_GAN):
     def __init__(self, sess, config, **kwargs):
