@@ -7,6 +7,15 @@ import tensorflow as tf
 from tensorflow.python import debug as tf_debug
 import argparse
 
+def str2bool(v):
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 parser = argparse.ArgumentParser()
 parser.add_argument('-max_iteration',       default=400000, type=int, help='Epoch to train [400000]')
 parser.add_argument('-learning_rate',       default=0.0001, type=float, help='Learning rate [2]')
