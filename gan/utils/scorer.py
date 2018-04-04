@@ -21,7 +21,7 @@ class Scorer(object):
         else:
             self.model = cs.Inception()
             self.size = 25000
-            self.frequency = 2000
+            self.frequency = 1000
         
         self.output = []
 
@@ -33,6 +33,7 @@ class Scorer(object):
     def set_train_codes(self, gan):
         suffix = '' if (gan.output_size <= 32) else ('-%d' % gan.output_size)
         path = os.path.join(gan.data_dir, '%s-codes%s.npy' % (self.dataset, suffix))
+
       
         if os.path.exists(path):
             self.train_codes = np.load(path)
@@ -92,8 +93,8 @@ class Scorer(object):
         gan.timer(step, "Inception mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
         
         output['fid'] = scores = cs.fid_score(codes, self.train_codes, output=self.stdout, 
-                                              split_method='bootstrap',
-                                              splits=3)
+                                             split_method='bootstrap',
+                                             splits=3)
         gan.timer(step, "FID mean (std): %f (%f)" % (np.mean(scores), np.std(scores)))
         
         ret = cs.polynomial_mmd_averages(codes, self.train_codes, output=self.stdout, 
