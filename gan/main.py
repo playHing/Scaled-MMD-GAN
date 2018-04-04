@@ -116,6 +116,9 @@ def main(_):
         elif FLAGS.visualize:
             gan.load_checkpoint()
             visualize(sess, gan, FLAGS, 2)
+        elif FLAGS.viz_filters:
+            gan.load_checkpoint()
+            visualize(sess, gan, FLAGS, 5)
         else:
             gan.get_samples(FLAGS.no_of_samples, layers=[-1])
 
