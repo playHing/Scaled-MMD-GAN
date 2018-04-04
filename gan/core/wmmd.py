@@ -4,7 +4,7 @@ from .ops import safer_norm, tf, squared_norm_jacobian
 
 class WMMD(MMD_GAN):
     def __init__(self, sess, config, **kwargs):
-        config.dof_dim = 1
+        #config.dof_dim = 1
         super(WMMD, self).__init__(sess, config, **kwargs)
         
     def set_loss(self, G, images):
