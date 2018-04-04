@@ -11,8 +11,14 @@ import numpy as np
 from time import gmtime, strftime
 import tensorflow as tf
 from six.moves import xrange
+import os
+import math
 
 pp = pprint.PrettyPrinter()
+
+import matplotlib as mpl
+mpl.use('Agg')
+import matplotlib.pyplot as plt
 
 def inverse_transform(images):
     return (images+1.)/2.
@@ -112,18 +118,29 @@ def visualize(sess, dcgan, config, option):
 
         image_set.append(sess.run(dcgan.sampler, feed_dict={dcgan.z: z_sample}))
         make_gif(image_set[-1], './samples/test_gif_%s.gif' % (idx))
+    elif option ==5:
+        plot_dir = os.path.join(dcgan.sample_dir, 'filters')
+        #conv_weights = sess.run([tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,'discriminator/d_h6_lin/Matrix:0')])
 
-    new_image_set = [
-        merge(np.array([images[idx] for images in image_set]), [10, 10])
-        for idx in range(64) + range(63, -1, -1)]
-    make_gif(new_image_set, './samples/test_gif_merged.gif', duration=8)
+        conv_weights = sess.run([tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,'discriminator/d_h0_conv/w:0')])
+        for i, c in enumerate(conv_weights[0]):
+            name = 'ckpt_' +dcgan.config.ckpt_name + '_conv{}'.format(i)
+            np.save(os.path.join(plot_dir, name),c)
+            plot_conv_weights(c, name,plot_dir)
+
+    #new_image_set = [
+    #    merge(np.array([images[idx] for images in image_set]), [10, 10])
+    #    for idx in range(64) + range(63, -1, -1)]
+    #make_gif(new_image_set, './samples/test_gif_merged.gif', duration=8)
 
 
 
 def unpickle(file):
-    import _pickle as cPickle
+    #import _pickle as cPickle
+    import cPickle 
     fo = open(file, 'rb')
-    dict = cPickle.load(fo, encoding='latin1')
+    #dict = cPickle.load(fo, encoding='latin1')
+    dict = cPickle.load(fo)
     fo.close()
     return dict
 
@@ -278,3 +295,170 @@ def PIL_read_jpeg(files, base_size=160, target_size=64, batch_size=128,
     )
     
     return images
+
+def plot_conv_weights(weights, name,plot_dir,channels_all=True):
+    """
+    Plots convolutional filters
+    :param weights: numpy array of rank 4
+    :param name: string, name of convolutional layer
+    :param channels_all: boolean, optional
+    :return: nothing, plots are saved on the disk
+    """
+    # make path to output folder
+    plot_dir = os.path.join(plot_dir, 'conv_weights', name)
+    # create directory if does not exist, otherwise empty it
+    prepare_dir(plot_dir, empty=True)
+
+    w_min = np.min(weights)
+    w_max = np.max(weights)
+
+    channels = [0]
+    # make a list of channels if all are plotted
+    if channels_all:
+        channels = range(weights.shape[2])
+
+    # get number of convolutional filters
+    num_filters = weights.shape[3]
+
+    # get number of grid rows and columns
+    grid_r, grid_c = get_grid_dim(num_filters)
+
+
+
+    # create figure and axes
+    fig, axes = plt.subplots(min([grid_r, grid_c]),
+                             max([grid_r, grid_c]))
+
+    w_min = -0.2
+    w_max = 0.2
+    # iterate channels
+    for channel in channels:
+        # iterate filters inside every channel
+        for l, ax in enumerate(axes.flat):
+            # get a single filter
+            img = weights[:, :, channel, l]
+            # put it on the grid
+            ax.imshow(img, vmin=w_min, vmax=w_max, interpolation='nearest', cmap='seismic')
+            # remove any labels from the axes
+            ax.set_xticks([])
+            ax.set_yticks([])
+        # save figure
+        plt.savefig(os.path.join(plot_dir, '{}-{}.png'.format(name, channel)), bbox_inches='tight')
+
+def plot_conv_output(conv_img, name):
+    """
+    Makes plots of results of performing convolution
+    :param conv_img: numpy array of rank 4
+    :param name: string, name of convolutional layer
+    :return: nothing, plots are saved on the disk
+    """
+    # make path to output folder
+    plot_dir = os.path.join(PLOT_DIR, 'conv_output')
+    plot_dir = os.path.join(plot_dir, name)
+
+    # create directory if does not exist, otherwise empty it
+    prepare_dir(plot_dir, empty=True)
+
+    w_min = np.min(conv_img)
+    w_max = np.max(conv_img)
+
+    # get number of convolutional filters
+    num_filters = conv_img.shape[3]
+
+    # get number of grid rows and columns
+    grid_r, grid_c = get_grid_dim(num_filters)
+
+    # create figure and axes
+    fig, axes = plt.subplots(min([grid_r, grid_c]),
+                             max([grid_r, grid_c]))
+
+    # iterate filters
+    for l, ax in enumerate(axes.flat):
+        # get a single image
+        img = conv_img[0, :, :,  l]
+        # put it on the grid
+        ax.imshow(img, vmin=w_min, vmax=w_max, interpolation='bicubic', cmap='Greys')
+        # remove any labels from the axes
+        ax.set_xticks([])
+        ax.set_yticks([])
+    # save figure
+    plt.savefig(os.path.join(plot_dir, '{}.png'.format(name)), bbox_inches='tight')
+
+def get_grid_dim(x):
+    """
+    Transforms x into product of two integers
+    :param x: int
+    :return: two ints
+    """
+    factors = prime_powers(x)
+    if len(factors) % 2 == 0:
+        i = int(len(factors) / 2)
+        return factors[i], factors[i - 1]
+
+    i = len(factors) // 2
+    return factors[i], factors[i]
+
+
+def prime_powers(n):
+    """
+    Compute the factors of a positive integer
+    Algorithm from https://rosettacode.org/wiki/Factors_of_an_integer#Python
+    :param n: int
+    :return: set
+    """
+    factors = set()
+    for x in xrange(1, int(math.sqrt(n)) + 1):
+        if n % x == 0:
+            factors.add(int(x))
+            factors.add(int(n // x))
+    return sorted(factors)
+
+
+def empty_dir(path):
+    """
+    Delete all files and folders in a directory
+    :param path: string, path to directory
+    :return: nothing
+    """
+    for the_file in os.listdir(path):
+        file_path = os.path.join(path, the_file)
+        try:
+            if os.path.isfile(file_path):
+                os.unlink(file_path)
+            elif os.path.isdir(file_path):
+                shutil.rmtree(file_path)
+        except Exception as e:
+            print 'Warning: {}'.format(e)
+
+
+def create_dir(path):
+    """
+    Creates a directory
+    :param path: string
+    :return: nothing
+    """
+    try:
+        os.makedirs(path)
+    except OSError as exc:
+        if exc.errno != errno.EEXIST:
+            raise
+
+
+def prepare_dir(path, empty=False):
+    """
+    Creates a directory if it soes not exist
+    :param path: string, path to desired directory
+    :param empty: boolean, delete all directory content if it exists
+    :return: nothing
+    """
+    if not os.path.exists(path):
+        create_dir(path)
+
+    if empty:
+        empty_dir(path)
+def viz_filters(sess, gan):
+    plot_dir = os.path.join(gan.sample_dir, 'filters')
+    conv_weights = sess.run([tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,'discriminator/d_h0_conv/w:0')])
+    for i, c in enumerate(conv_weights[0]):
+        plot_conv_weights(c, 'conv{}'.format(i),plot_dir)
+
