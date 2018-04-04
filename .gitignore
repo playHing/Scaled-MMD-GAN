@@ -88,3 +88,14 @@ ENV/
 
 # Rope project settings
 .ropeproject
+
+# Checkpoints and data dirs
+sample_mmd/
+checkpoint_mmd/
+data/
+experiments/
+experiments_0/
+old_exp/
+log_mmd/
+lenet/
+
