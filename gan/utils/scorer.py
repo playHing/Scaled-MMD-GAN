@@ -114,8 +114,8 @@ class Scorer(object):
 
         
         if self.lr_scheduler:
-            n = 1
-            nc = 1
+            n =  gan.config.MMD_sdlr_past_sample
+            nc = gan.config.MMD_sdlr_num_test
             bs = 2048
             new_Y = codes[:bs]
             X = self.train_codes[:bs]
