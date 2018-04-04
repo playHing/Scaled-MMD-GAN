@@ -386,12 +386,15 @@ class MMD_GAN(object):
                 if (self.config.hs_decay_rate > 0) and self.config.hessian_scale:
                     self.sess.run(self.hs_decay_op)
 
-    def train_step(self, batch_images=None):
+
+
+    def _train_step_simultaneous_update(self, batch_images=None):
         step = self.sess.run(self.global_step)
 
         self.set_counters(step)
+        self.d_counter = 0
         write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
-                or (np.mod(step, 1000) == 0) or (self.err_counter > 0)
+                or (np.mod(step, 1000) == 0) or (self.err_counter > 0) 
 
         eval_ops = [self.g_gvs, self.d_gvs, self.g_loss, self.d_loss]
 
@@ -400,6 +403,46 @@ class MMD_GAN(object):
                 [self.TrainSummary] + eval_ops
             )  
         else:
+            if write_summary:
+                _, _, summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
+                    [self.g_grads, self.d_grads, self.TrainSummary] + eval_ops
+                )
+                      
+            else:
+                _, _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.g_grads, self.d_grads] + eval_ops)
+            et = self.timer(step, "g step" if (self.d_counter == 0) else "d step", False)
+
+        assert ~np.isnan(g_loss), et + "NaN g_loss, epoch: "
+        assert ~np.isnan(d_loss), et + "NaN d_loss, epoch: "
+
+        
+        if write_summary:
+            self.set_summary(step, summary_str, g_loss, d_loss,write_summary)  
+        self.set_decay(step)
+        if self.config.compute_scores:
+            self.scorer.compute(self, step)
+        return g_loss, d_loss, step
+
+
+
+
+    def train_step(self, batch_images=None):
+        if self.config.simultaneous_update:
+            return self._train_step_simultaneous_update(batch_images)
+        step = self.sess.run(self.global_step)
+
+        self.set_counters(step)
+        write_summary = ((np.mod(step, 50) == 0) and (step < 1000)) \
+                or (np.mod(step, 1000) == 0) or (self.err_counter > 0) 
+
+        eval_ops = [self.g_gvs, self.d_gvs, self.g_loss, self.d_loss]
+        #print("step %d", step)
+
+        if self.config.is_demo:
+            summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
+                [self.TrainSummary] + eval_ops
+            )  
+        else: 
             if self.d_counter == 0:
                 if write_summary:
                     _, summary_str, g_grads, d_grads, g_loss, d_loss = self.sess.run(
@@ -410,6 +453,7 @@ class MMD_GAN(object):
                     _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.g_grads] + eval_ops)
             else:
                 _, g_grads, d_grads, g_loss, d_loss = self.sess.run([self.d_grads] + eval_ops)
+                #print("g loss: ",g_loss, ",  d loss:", d_loss)
             et = self.timer(step, "g step" if (self.d_counter == 0) else "d step", False)
 
         assert ~np.isnan(g_loss), et + "NaN g_loss, epoch: "
