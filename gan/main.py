@@ -50,7 +50,7 @@ parser.add_argument('-grad_expectation',    default=0, type=int, help='True for 
 parser.add_argument('-is_demo',             default=False, type=str2bool, help='For testing [False]')
 parser.add_argument('-hessian_scale',       default=False, type=str2bool, help='For scaling the MMD')
 parser.add_argument('-hessian_scale_coeff', default=1., type=float, help='coeff of scaling')
-parser.add_argument('-hs_decay_rate',       default=0.5, type=float, help='decay of the scaling factor')
+parser.add_argument('-hs_decay_rate',       default=1., type=float, help='decay of the scaling factor')
 parser.add_argument('-hs_freq_decay',       default=100000, type=int, help='For scaling the MMD')
 parser.add_argument('-scale_variant',       default=0, type=int, help='The variant of the scaled MMD')
 parser.add_argument('-lr_freq_decay',       default=100000, type=int, help='The variant of the scaled MMD')
@@ -59,7 +59,7 @@ parser.add_argument('-clipping_iter',       default=-1, type=int, help='Ensures 
 parser.add_argument('-restart_hs',          default=False, type=str2bool, help='Ensures the discriminator network is injective by adding the input to the feature')
 
 parser.add_argument('-simultaneous_update', default=False, type=str2bool, help='Ensures the discriminator network is injective by adding the input to the feature')
-parser.add_argument('-MMD_sdlr_past_sample',default=5, type=int, help='Ensures the discriminator network is injective by adding the input to the feature')
+parser.add_argument('-MMD_sdlr_past_sample',default=10, type=int, help='Ensures the discriminator network is injective by adding the input to the feature')
 parser.add_argument('-MMD_sdlr_num_test',   default=3, type=int, help='Ensures the discriminator network is injective by adding the input to the feature')
 
 parser.add_argument('-gradient_penalty',    default=0.0, type=float, help='Use gradient penalty [0.0]')
@@ -84,6 +84,11 @@ parser.add_argument('-checkpoint_freq',     default=5000, type=int, help="L2 pen
 parser.add_argument('-max_to_keep',         default=2, type=int, help="L2 penalty on discriminator features [0.0]")
 parser.add_argument('-ckpt_name',           default="", type=str, help="L2 penalty on discriminator features [0.0]")
 
+parser.add_argument('-spectral_normed',     default=False, type=str2bool, help='spectral normalization')
+parser.add_argument('-is_train_scale',      default=False, type=str2bool, help='scale of spectral normalized weights')
+
+parser.add_argument('-spectral_normed_G',     default=False, type=str2bool, help='spectral normalization')
+parser.add_argument('-is_train_scale_G',      default=False, type=str2bool, help='scale of spectral normalized weights')
 
 
 FLAGS = parser.parse_args()   

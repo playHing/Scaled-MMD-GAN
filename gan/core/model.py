@@ -125,7 +125,6 @@ class MMD_GAN(object):
                                       name='hessian_scale_coeff', 
                                       trainable=False, dtype=tf.float32)
                 self.hs_decay_op = self.hs.assign(self.hs * self.config.hs_decay_rate)
-               
 
         self.set_pipeline()
 
@@ -136,22 +135,20 @@ class MMD_GAN(object):
                                     dtype=tf.float32, name='sample_z')        
 
         Generator, Discriminator = get_networks(self.config.architecture)
-        generator = Generator(self.gf_dim, self.c_dim, self.output_size, self.config.batch_norm)
+        generator = Generator(self.gf_dim, self.c_dim, self.output_size, self.config.batch_norm,spectral_normed = self.config.spectral_normed_G, is_train_scale=  self.config.is_train_scale_G)
         dbn = self.config.batch_norm & (self.config.gradient_penalty <= 0)
-        if self.config.d_is_injective:
-            self.discriminator = InjectiveDiscriminator(Discriminator(self.df_dim, self.dof_dim, dbn))
-        else:
-            self.discriminator = Discriminator(self.df_dim, self.dof_dim, dbn)
+
+        self.discriminator = Discriminator(self.df_dim, self.dof_dim, dbn,spectral_normed = self.config.spectral_normed, is_train_scale=  self.config.is_train_scale)
         # tf.summary.histogram("z", self.z)
 
-        self.G = generator(self.z, self.batch_size)
+        self.G = generator(self.z, self.batch_size,update_collection=None)
 
-        self.sampler = generator(self.sample_z, self.sample_size)
+        self.sampler = generator(self.sample_z, self.sample_size,update_collection="NO_OPS")
         
         self.d_images_layers = self.discriminator(self.images, 
-            self.real_batch_size, return_layers=True)
+            self.real_batch_size, return_layers=True, update_collection=None)
         self.d_G_layers = self.discriminator(self.G, self.batch_size,
-                                             return_layers=True)
+                                             return_layers=True, update_collection="NO_OPS")
         self.d_images = self.d_images_layers['hF']
         self.d_G = self.d_G_layers['hF']
             
@@ -197,7 +194,7 @@ class MMD_GAN(object):
         real_data = self.images[:bs] # discirminator input level
         fake_data = self.G[:bs] # discriminator input level
         x_hat_data = (1. - alpha) * real_data + alpha * fake_data
-        x_hat = self.discriminator(x_hat_data, bs)
+        x_hat = self.discriminator(x_hat_data, bs, update_collection = "NO_OPS")
         Ekx = lambda yy: tf.reduce_mean(kernel(x_hat, yy, K_XY_only=True), axis=1)
         Ekxr, Ekxf = Ekx(real), Ekx(fake)
         witness = Ekxr - Ekxf

@@ -36,7 +36,7 @@ class WMMD(MMD_GAN):
             alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
             x_hat_data =  tf.boolean_mask(self.images[:bs],(alpha<0.5))  + tf.boolean_mask(self.G[:bs],(alpha>=0.5))
         x_hat_data = tf.stop_gradient(x_hat_data)
-        x_hat = self.discriminator(x_hat_data, bs)
+        x_hat = self.discriminator(x_hat_data, bs, update_collection = "NO_OPS")
         if self.config.d_is_injective:
             norme2_jac = squared_norm_jacobian(x_hat[:,:-self.input_dim ], x_hat_data)
             avg_norme2_jac = tf.reduce_mean( norme2_jac  + tf.square(self.discriminator.scale_id_layer)*self.input_dim )
