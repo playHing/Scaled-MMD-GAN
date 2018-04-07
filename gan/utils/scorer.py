@@ -21,7 +21,7 @@ class Scorer(object):
         else:
             self.model = cs.Inception()
             self.size = 25000
-            self.frequency = 1000
+            self.frequency = 2000
         
         self.output = []
 
@@ -161,7 +161,8 @@ class Scorer(object):
         filepath = os.path.join(gan.sample_dir, 'score%d.npz' % step)
 
         output['lr'] = np.array([gan.sess.run(gan.lr)])
-        output['hs'] = np.array([gan.sess.run(gan.hs)])
+        if gan.config.hessian_scale:
+            output['hs'] = np.array([gan.sess.run(gan.hs)])
 
         np.savez(filepath, **output)
         gan.timer(step, "Scoring end, total time = %.1f s" % (time.time() - tt))
