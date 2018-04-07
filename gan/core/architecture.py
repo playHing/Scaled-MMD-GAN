@@ -6,17 +6,21 @@ Created on Wed Jan 10 14:34:47 2018
 @author: mikolajbinkowski
 """
 import tensorflow as tf
-from core.ops import batch_norm, conv2d, deconv2d, linear, lrelu
+from core.snops import batch_norm, conv2d, deconv2d, linear, lrelu
 from utils.misc import conv_sizes
 # Generators
 
 class Generator(object):
     def __init__(self, dim, c_dim, output_size, use_batch_norm, prefix='g_'):
         self.used = False
+        self.use_batch_norm = use_batch_norm
         self.dim = dim
         self.c_dim = c_dim
         self.output_size = output_size
         self.prefix = prefix
+        self.spectral_normed = spectral_normed
+        self.scale = scale
+        self.is_train_scale = is_train_scale
         if use_batch_norm:
             self.g_bn0 = batch_norm(name=prefix + 'bn0')
             self.g_bn1 = batch_norm(name=prefix + 'bn1')
@@ -49,21 +53,21 @@ class DCGANGenerator(Generator):
         # 64, 32, 16, 8, 4 - for self.output_size = 64
         # default architecture
         # For Cramer: self.gf_dim = 64
-        z_ = linear(seed, self.dim * 8 * s16 * s16, self.prefix + 'h0_lin') # project random noise seed and reshape
+        z_ = linear(seed, self.dim * 8 * s16 * s16, self.prefix + 'h0_lin',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale) # project random noise seed and reshape
         
         h0 = tf.reshape(z_, [batch_size, s16, s16, self.dim * 8])
         h0 = tf.nn.relu(self.g_bn0(h0))
         
-        h1 = deconv2d(h0, [batch_size, s8, s8, self.dim*4], name=self.prefix + 'h1')
+        h1 = deconv2d(h0, [batch_size, s8, s8, self.dim*4], name=self.prefix + 'h1',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         h1 = tf.nn.relu(self.g_bn1(h1))
                         
-        h2 = deconv2d(h1, [batch_size, s4, s4, self.dim*2], name=self.prefix + 'h2')
+        h2 = deconv2d(h1, [batch_size, s4, s4, self.dim*2], name=self.prefix + 'h2',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         h2 = tf.nn.relu(self.g_bn2(h2))
         
-        h3 = deconv2d(h2, [batch_size, s2, s2, self.dim*1], name=self.prefix + 'h3')
+        h3 = deconv2d(h2, [batch_size, s2, s2, self.dim*1], name=self.prefix + 'h3',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         h3 = tf.nn.relu(self.g_bn3(h3))
         
-        h4 = deconv2d(h3, [batch_size, s1, s1, self.c_dim], name=self.prefix + 'h4')
+        h4 = deconv2d(h3, [batch_size, s1, s1, self.c_dim], name=self.prefix + 'h4',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         return tf.nn.sigmoid(h4)        
 
 
@@ -71,24 +75,24 @@ class DCGAN5Generator(Generator):
     def network(self, seed, batch_size):
         s1, s2, s4, s8, s16, s32 = conv_sizes(self.output_size, layers=5, stride=2)
         # project `z` and reshape
-        z_= linear(seed, self.dim * 16 * s32 * s32, self.prefix + 'h0_lin')
+        z_= linear(seed, self.dim * 16 * s32 * s32, self.prefix + 'h0_lin',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         
         h0 = tf.reshape(z_, [-1, s32, s32, self.dim * 16])
         h0 = tf.nn.relu(self.g_bn0(h0))
         
-        h1 = deconv2d(h0, [batch_size, s16, s16, self.dim*8], name=self.prefix + 'h1')
+        h1 = deconv2d(h0, [batch_size, s16, s16, self.dim*8], name=self.prefix + 'h1',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         h1 = tf.nn.relu(self.g_bn1(h1))
                         
-        h2 = deconv2d(h1, [batch_size, s8, s8, self.dim*4], name=self.prefix + 'h2')
+        h2 = deconv2d(h1, [batch_size, s8, s8, self.dim*4], name=self.prefix + 'h2',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         h2 = tf.nn.relu(self.g_bn2(h2))
 
-        h3 = deconv2d(h2, [batch_size, s4, s4, self.dim*2], name=self.prefix + 'h3')
+        h3 = deconv2d(h2, [batch_size, s4, s4, self.dim*2], name=self.prefix + 'h3',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         h3 = tf.nn.relu(self.g_bn3(h3))
 
-        h4 = deconv2d(h3, [batch_size, s2, s2, self.dim], name=self.prefix + 'h4')
+        h4 = deconv2d(h3, [batch_size, s2, s2, self.dim], name=self.prefix + 'h4',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         h4 = tf.nn.relu(self.g_bn4(h4))                
         
-        h5 = deconv2d(h4, [batch_size, s1, s1, self.c_dim], name=self.prefix + 'h5')
+        h5 = deconv2d(h4, [batch_size, s1, s1, self.c_dim], name=self.prefix + 'h5',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
         return tf.nn.sigmoid(h5)
 
 
@@ -118,11 +122,15 @@ class ResNetGenerator(Generator):
 # Discriminator
 
 class Discriminator(object):
-    def __init__(self, dim, o_dim, use_batch_norm, prefix='d_'):
+    def __init__(self, dim, o_dim, use_batch_norm, prefix='d_',spectral_normed = False, scale = 1.0, is_train_scale = False):
         self.dim = dim
         self.o_dim = o_dim 
         self.prefix = prefix
         self.used = False
+        self.use_batch_norm = use_batch_norm
+        self.spectral_normed = spectral_normed
+        self.scale = scale
+        self.is_train_scale = is_train_scale
         if use_batch_norm:
             self.d_bn0 = batch_norm(name=prefix + 'bn0')
             self.d_bn1 = batch_norm(name=prefix + 'bn1')
@@ -138,13 +146,13 @@ class Discriminator(object):
             self.d_bn4 = lambda x: x
             self.d_bn5 = lambda x: x
         
-    def __call__(self, image, batch_size, return_layers=False):
+    def __call__(self, image, batch_size, return_layers=False,  update_collection=tf.GraphKeys.UPDATE_OPS):
         with tf.variable_scope("discriminator") as scope:
             if self.used:
                 scope.reuse_variables()
             self.used = True
             
-            layers = self.network(image, batch_size)
+            layers = self.network(image, batch_size, update_collection)
             
             if return_layers:
                 return layers
@@ -154,41 +162,43 @@ class Discriminator(object):
         pass
 
 class DCGANDiscriminator(Discriminator):        
-    def network(self, image, batch_size):
+    def network(self, image, batch_size, update_collection):
         o_dim = self.o_dim if (self.o_dim > 0) else 8 * self.dim
-        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv')) 
-        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv')))
-        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv')))
-        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv')))
-        hF = linear(tf.reshape(h3, [batch_size, -1]), o_dim, self.prefix + 'h4_lin')
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)) 
+        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)))
+        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        hF = linear(tf.reshape(h3, [batch_size, -1]), o_dim, self.prefix + 'h4_lin',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)
         
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF}
 
 class DCGAN5Discriminator(Discriminator):
-    def network(self, image, batch_size):
+    def network(self, image, batch_size,update_collection):
         o_dim = self.o_dim if (self.o_dim > 0) else 16 * self.dim
-        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv'))
-        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv')))
-        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv')))
-        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv')))
-        h4 = lrelu(self.d_bn4(conv2d(h3, self.dim * 16, name=self.prefix + 'h4_conv')))
-        hF = linear(tf.reshape(h4, [batch_size, -1]), o_dim, self.prefix + 'h6_lin')
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale))
+        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv',update_collection=update_collection, spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        h4 = lrelu(self.d_bn4(conv2d(h3, self.dim * 16, name=self.prefix + 'h4_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        hF = linear(tf.reshape(h4, [batch_size, -1]), o_dim, self.prefix + 'h6_lin',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)
         
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}        
 
 class FullConvDiscriminator(Discriminator):
-    def network(self, image, batch_size):
-        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv'))
-        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv')))
-        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv')))
-        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv')))
-        hF = lrelu(self.d_bn4(conv2d(h3, self.o_dim, name=self.prefix + 'hF_conv')))
+    def network(self, image, batch_size,update_collection):
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale))
+        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
+        hF = lrelu(self.d_bn4(conv2d(h3, self.o_dim, name=self.prefix + 'hF_conv',update_collection=update_collection,spectral_normed = self.spectral_normed,scale = self.scale , is_train_scale = self.is_train_scale)))
         hF = tf.reshape(hF, [batch_size, -1])
         
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF}
 
+
+# Warning this implementation doesn't allow spectral normalization
 class ResNetDiscriminator(Discriminator):
-    def network(self, image, batch_size):
+    def network(self, image, batch_size,update_collection):
         from core.resnet import block, ops
         image = tf.transpose(image, [0, 3, 1, 2]) # NHWC to NCHW
         
@@ -213,9 +223,9 @@ class InjectiveDiscriminator(Discriminator):
     def __init__(self, net):
         self.net = net
         self.scale_id_layer = 1.
-        super(InjectiveDiscriminator,self).__init__(net.dim, net.o_dim, False, prefix=net.prefix)
+        super(InjectiveDiscriminator,self).__init__(net.dim, net.o_dim, net.use_batch_norm, prefix=net.prefix)
 
-    def network(self, image, batch_size):
+    def network(self, image, batch_size,update_collection):
         layers = self.net.network(image, batch_size)
         id_layer_0 = tf.reshape(image, [batch_size, -1])
         init_value  = 1./(id_layer_0.get_shape().as_list()[-1])
