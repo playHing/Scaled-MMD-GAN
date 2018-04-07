@@ -11,7 +11,7 @@ from utils.misc import conv_sizes
 # Generators
 
 class Generator(object):
-    def __init__(self, dim, c_dim, output_size, use_batch_norm, prefix='g_'):
+    def __init__(self, dim, c_dim, output_size, use_batch_norm, prefix='g_',spectral_normed = False, scale = 1.0, is_train_scale = False):
         self.used = False
         self.use_batch_norm = use_batch_norm
         self.dim = dim
