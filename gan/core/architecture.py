@@ -9,7 +9,7 @@ import tensorflow as tf
 from core.ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from core.mmd import _check_numerics
 from utils.misc import conv_sizes
-from tf.python.client import device_lib
+from tensorflow.python.client import device_lib
 # Generators
 def check_numerics(x, name): 
     if _check_numerics:
@@ -51,16 +51,15 @@ class Generator:
             
     def __call__(self, seed, batch_size):
         with tf.variable_scope('generator') as scope:   
-            if self.used:
-                scope.reuse_variables()
-            self.used = True
-            
             gpus = get_available_gpus()
             batch_split = split_batch(batch_size, len(gpus))
             seed_split = tf.split(seed, batch_split, axis=0)
             outputs = []
             
             for gpu, batch_size_, seed_ in zip(gpus, batch_split, seed_split):
+                if self.used:
+                    scope.reuse_variables()
+                self.used = True
                 with tf.device(gpu):
                     outputs.append(self.network(seed_, batch_size_))
                     
@@ -167,16 +166,15 @@ class Discriminator:
         
     def __call__(self, image, batch_size, return_layers=False):
         with tf.variable_scope("discriminator") as scope:
-            if self.used:
-                scope.reuse_variables()
-            self.used = True
-
             gpus = get_available_gpus()
             batch_split = split_batch(batch_size, len(gpus))
             image_split = tf.split(image, batch_split, axis=0)
             layers_ = []
             
             for gpu, batch_size_, image_ in zip(gpus, batch_split, image_split):
+                if self.used:
+                    scope.reuse_variables()
+                self.used = True
                 with tf.device(gpu):
                     layers_.append(self.network(image_, batch_size_))
             
