@@ -9,12 +9,24 @@ import tensorflow as tf
 from core.ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from core.mmd import _check_numerics
 from utils.misc import conv_sizes
+from tf.python.client import device_lib
 # Generators
 def check_numerics(x, name): 
     if _check_numerics:
         return tf.check_numerics(x, name)
     return x
     
+    
+def split_batch(batch_size, splits):
+    k = float(batch_size) / splits
+    return [int(k*(i+1)) - int(k*i) for i in range(splits)]
+
+
+def get_available_gpus():
+    local_device_protos = device_lib.list_local_devices()
+    return [x.name for x in local_device_protos if x.device_type == 'GPU']
+
+
 class Generator:
     def __init__(self, dim, c_dim, output_size, use_batch_norm, prefix='g_'):
         self.used = False
@@ -42,7 +54,17 @@ class Generator:
             if self.used:
                 scope.reuse_variables()
             self.used = True
-            return self.network(seed, batch_size)
+            
+            gpus = get_available_gpus()
+            batch_split = split_batch(batch_size, len(gpus))
+            seed_split = tf.split(seed, batch_split, axis=0)
+            outputs = []
+            
+            for gpu, batch_size_, seed_ in zip(gpus, batch_split, seed_split):
+                with tf.device(gpu):
+                    outputs.append(self.network(seed_, batch_size_))
+                    
+            return tf.concat(outputs, axis=0)
         
     def network(self, seed, batch_size):
         pass
@@ -148,8 +170,18 @@ class Discriminator:
             if self.used:
                 scope.reuse_variables()
             self.used = True
+
+            gpus = get_available_gpus()
+            batch_split = split_batch(batch_size, len(gpus))
+            image_split = tf.split(image, batch_split, axis=0)
+            layers_ = []
             
-            layers = self.network(image, batch_size)
+            for gpu, batch_size_, image_ in zip(gpus, batch_split, image_split):
+                with tf.device(gpu):
+                    layers_.append(self.network(image_, batch_size_))
+            
+            layers = dict([(k, tf.concat([l[k] for l in layers_], axis=0)) \
+                           for k in layers_[0].keys()])
             
             if return_layers:
                 return layers
