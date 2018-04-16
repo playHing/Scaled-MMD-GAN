@@ -22,9 +22,8 @@ def split_batch(batch_size, splits):
     return [int(k*(i+1)) - int(k*i) for i in range(splits)]
 
 
-def get_available_gpus():
-    local_device_protos = device_lib.list_local_devices()
-    return [x.name for x in local_device_protos if x.device_type == 'GPU']
+local_device_protos = device_lib.list_local_devices()
+GPUS = [x.name for x in local_device_protos if x.device_type == 'GPU']
 
 
 class Generator:
@@ -50,20 +49,19 @@ class Generator:
             self.g_bn5 = lambda x: x
             
     def __call__(self, seed, batch_size):
-        with tf.variable_scope('generator') as scope:   
-            gpus = get_available_gpus()
-            batch_split = split_batch(batch_size, len(gpus))
-            seed_split = tf.split(seed, batch_split, axis=0)
-            outputs = []
+        batch_split = split_batch(batch_size, len(GPUS))
+        seed_split = tf.split(seed, batch_split, axis=0)
+        outputs = []
             
-            for gpu, batch_size_, seed_ in zip(gpus, batch_split, seed_split):
+        for gpu, batch_size_, seed_ in zip(GPUS, batch_split, seed_split):
+            with tf.variable_scope('generator') as scope:   
                 if self.used:
                     scope.reuse_variables()
                 self.used = True
                 with tf.device(gpu):
                     outputs.append(self.network(seed_, batch_size_))
                     
-            return tf.concat(outputs, axis=0)
+        return tf.concat(outputs, axis=0)
         
     def network(self, seed, batch_size):
         pass
@@ -165,25 +163,24 @@ class Discriminator:
             self.d_bn5 = lambda x: x
         
     def __call__(self, image, batch_size, return_layers=False):
-        with tf.variable_scope("discriminator") as scope:
-            gpus = get_available_gpus()
-            batch_split = split_batch(batch_size, len(gpus))
-            image_split = tf.split(image, batch_split, axis=0)
-            layers_ = []
+        batch_split = split_batch(batch_size, len(GPUS))
+        image_split = tf.split(image, batch_split, axis=0)
+        layers_ = []
             
-            for gpu, batch_size_, image_ in zip(gpus, batch_split, image_split):
+        for gpu, batch_size_, image_ in zip(GPUS, batch_split, image_split):
+            with tf.variable_scope("discriminator") as scope:
                 if self.used:
                     scope.reuse_variables()
                 self.used = True
                 with tf.device(gpu):
                     layers_.append(self.network(image_, batch_size_))
             
-            layers = dict([(k, tf.concat([l[k] for l in layers_], axis=0)) \
-                           for k in layers_[0].keys()])
+        layers = dict([(k, tf.concat([l[k] for l in layers_], axis=0)) \
+                       for k in layers_[0].keys()])
             
-            if return_layers:
-                return layers
-            return layers['hF']
+        if return_layers:
+            return layers
+        return layers['hF']
         
     def network(self, image, batch_size):
         pass
