@@ -357,9 +357,8 @@ class MMD_GAN(object):
 
     def set_decay(self, step, is_init = False):
         if is_init:
-            if not self.config.restart_lr:
-                lr_decays_so_far = int((step )/self.config.lr_freq_decay)
-                self.lr *= self.config.decay_rate ** lr_decays_so_far
+            if  self.config.restart_lr:
+                self.lr.assign(self.config.learning_rate)
             if self.config.gp_decay_rate > 0 and self.config.gradient_penalty >0:
                 self.gp *= self.config.gp_decay_rate ** lr_decays_so_far
                 print('current gradient penalty: %f' % self.sess.run(self.gp))
@@ -490,7 +489,8 @@ class MMD_GAN(object):
                                   self.sess.run(self.lr)))
         else:
             print(" [!] Load failed...")
-        self.sess.run(self.lr.assign(self.config.learning_rate))
+            self.config.restart_lr = True
+
 
         step = self.sess.run(self.global_step)
 
