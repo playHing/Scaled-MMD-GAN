@@ -36,19 +36,19 @@ class Generator(object):
             self.g_bn4 = lambda x: x
             self.g_bn5 = lambda x: x
             
-    def __call__(self, seed, batch_size):
+    def __call__(self, seed, batch_size,update_collection=tf.GraphKeys.UPDATE_OPS):
         with tf.variable_scope('generator') as scope:   
             if self.used:
                 scope.reuse_variables()
             self.used = True
-            return self.network(seed, batch_size)
+            return self.network(seed, batch_size,update_collection)
         
-    def network(self, seed, batch_size):
+    def network(self, seed, batch_size,update_collection):
         pass
 
     
 class DCGANGenerator(Generator):
-    def network(self, seed, batch_size):
+    def network(self, seed, batch_size,update_collection):
         s1, s2, s4, s8, s16 = conv_sizes(self.output_size, layers=4, stride=2)
         # 64, 32, 16, 8, 4 - for self.output_size = 64
         # default architecture
@@ -72,7 +72,7 @@ class DCGANGenerator(Generator):
 
 
 class DCGAN5Generator(Generator):
-    def network(self, seed, batch_size):
+    def network(self, seed, batch_size,update_collection):
         s1, s2, s4, s8, s16, s32 = conv_sizes(self.output_size, layers=5, stride=2)
         # project `z` and reshape
         z_= linear(seed, self.dim * 16 * s32 * s32, self.prefix + 'h0_lin',update_collection=update_collection,spectral_normed = self.spectral_normed, scale = self.scale , is_train_scale = self.is_train_scale)
@@ -97,7 +97,7 @@ class DCGAN5Generator(Generator):
 
 
 class ResNetGenerator(Generator):
-    def network(self, seed, batch_size):
+    def network(self, seed, batch_size,update_collection):
         from core.resnet import block, ops
         s1, s2, s4, s8, s16, s32 = conv_sizes(self.output_size, layers=5, stride=2)
         # project `z` and reshape
