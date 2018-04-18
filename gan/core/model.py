@@ -126,38 +126,38 @@ class MMD_GAN(object):
         dbn = self.config.batch_norm & (self.config.gradient_penalty <= 0)
         self.discriminator = Discriminator(self.df_dim, self.dof_dim, dbn)
         # tf.summary.histogram("z", self.z)
-        
-        self.G = generator(self.z, self.batch_size)
-        
-        if self.check_numerics:
-            self.G = tf.check_numerics(self.G, 'self.G')
-
-        self.d_images_layers = self.discriminator(self.images, 
-            self.real_batch_size, return_layers=True)
-        self.d_G_layers = self.discriminator(self.G, self.batch_size,
-                                             return_layers=True)
-        self.d_images = self.d_images_layers['hF']
-        self.d_G = self.d_G_layers['hF']
-        
-        self.sampler = generator(self.sample_z, self.sample_size)
-        
-        if self.config.is_train:
-            self.set_loss(self.d_G, self.d_images)
-
-        block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
-        tf.summary.image("train/input image", 
-                         self.imageRearrange(tf.clip_by_value(self.images, 0, 1), block))
-        tf.summary.image("train/gen image", 
-                         self.imageRearrange(tf.clip_by_value(self.G, 0, 1), block))
-        
-        t_vars = tf.trainable_variables()
-
-        self.d_vars = [var for var in t_vars if 'd_' in var.name]
-        self.g_vars = [var for var in t_vars if 'g_' in var.name]
-
-        self.saver = tf.train.Saver(max_to_keep=2)
+        with self.sess as sess:
+            self.G = generator(self.z, self.batch_size)
             
-        print('[*] Model built.')
+            if self.check_numerics:
+                self.G = tf.check_numerics(self.G, 'self.G')
+    
+            self.d_images_layers = self.discriminator(self.images, 
+                self.real_batch_size, return_layers=True)
+            self.d_G_layers = self.discriminator(self.G, self.batch_size,
+                                                 return_layers=True)
+            self.d_images = self.d_images_layers['hF']
+            self.d_G = self.d_G_layers['hF']
+            
+            self.sampler = generator(self.sample_z, self.sample_size)
+            
+            if self.config.is_train:
+                self.set_loss(self.d_G, self.d_images)
+    
+            block = min(8, int(np.sqrt(self.real_batch_size)), int(np.sqrt(self.batch_size)))
+            tf.summary.image("train/input image", 
+                             self.imageRearrange(tf.clip_by_value(self.images, 0, 1), block))
+            tf.summary.image("train/gen image", 
+                             self.imageRearrange(tf.clip_by_value(self.G, 0, 1), block))
+            
+            t_vars = tf.trainable_variables()
+    
+            self.d_vars = [var for var in t_vars if 'd_' in var.name]
+            self.g_vars = [var for var in t_vars if 'g_' in var.name]
+    
+            self.saver = tf.train.Saver(max_to_keep=2)
+                
+            print('[*] Model built.')
 
 
     def set_loss(self, G, images):

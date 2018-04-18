@@ -68,36 +68,37 @@ def main(_):
     elif 'cramer' in FLAGS.model:
         from core.cramer import Cramer_GAN as Model
         
-    with tf.Session(config=sess_config) as sess:
-        if FLAGS.dataset == 'mnist':
-            gan = Model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
-                        data_dir=FLAGS.data_dir)
-        elif FLAGS.dataset == 'cifar10':
-            gan = Model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
-                        data_dir=FLAGS.data_dir)
-        elif FLAGS.dataset in  ['celebA', 'lsun']:
-            gan = Model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=FLAGS.output_size, c_dim=3,
-                        data_dir=FLAGS.data_dir)
-        else:
-            gan = Model(sess, batch_size=FLAGS.batch_size, 
-                        output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
-                        data_dir=FLAGS.data_dir)
-            
-        if FLAGS.is_train:
-            gan.train()
-        elif FLAGS.print_pca:
-            gan.print_pca()
-        elif FLAGS.visualize:
-            gan.load_checkpoint()
-            visualize(sess, gan, FLAGS, 2)
-        else:
-            gan.get_samples(FLAGS.no_of_samples, layers=[-1])
+#    with tf.Session(config=sess_config) as sess:
+    sess = tf.Session(config=sess_config)
+    if FLAGS.dataset == 'mnist':
+        gan = Model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=28, c_dim=1,
+                    data_dir=FLAGS.data_dir)
+    elif FLAGS.dataset == 'cifar10':
+        gan = Model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=32, c_dim=3,
+                    data_dir=FLAGS.data_dir)
+    elif FLAGS.dataset in  ['celebA', 'lsun']:
+        gan = Model(sess, config=FLAGS, batch_size=FLAGS.batch_size, output_size=FLAGS.output_size, c_dim=3,
+                    data_dir=FLAGS.data_dir)
+    else:
+        gan = Model(sess, batch_size=FLAGS.batch_size, 
+                    output_size=FLAGS.output_size, c_dim=FLAGS.c_dim,
+                    data_dir=FLAGS.data_dir)
+        
+    if FLAGS.is_train:
+        gan.train()
+    elif FLAGS.print_pca:
+        gan.print_pca()
+    elif FLAGS.visualize:
+        gan.load_checkpoint()
+        visualize(sess, gan, FLAGS, 2)
+    else:
+        gan.get_samples(FLAGS.no_of_samples, layers=[-1])
 
 
-        if FLAGS.log:
-            sys.stdout = gan.old_stdout
-            gan.log_file.close()
-        gan.sess.close()
+    if FLAGS.log:
+        sys.stdout = gan.old_stdout
+        gan.log_file.close()
+    gan.sess.close()
         
 if __name__ == '__main__':
     tf.app.run()
