@@ -29,15 +29,16 @@ class SMMD_GAN(MMD_GAN):
         alpha = tf.random_uniform(shape=[bs, 1, 1, 1])
         real_data = self.images[:bs] # discirminator input level
         fake_data = self.G[:bs] # discriminator input level
-        if 'grad_norm' in self.config.suffix:
-            if '_PQ' in self.config.suffix:
-                x_hat_data = tf.concat([real_data[:bs//2], fake_data[:bs//2]], axis=0)
-            elif '_P' in self.config.suffix:
-                x_hat_data = real_data
-            else:
-                x_hat_data = fake_data
+            
+        if '_PQ' in self.config.suffix:
+            x_hat_data = tf.concat([real_data[:bs//2], fake_data[:bs//2]], axis=0)
+        elif '_P' in self.config.suffix:
+            x_hat_data = real_data
+        elif '_Q' in self.config.suffix:
+            x_hat_data = fake_data
         else:
             x_hat_data = (1. - alpha) * real_data + alpha * fake_data
+
         if self.check_numerics:
             x_hat_data = tf.check_numerics(x_hat_data, 'x_hat_data')
         x_hat = self.discriminator(x_hat_data, bs)
@@ -52,13 +53,10 @@ class SMMD_GAN(MMD_GAN):
         if self.check_numerics:
             gradients = tf.check_numerics(gradients, 'gradients 0')
 
-        if 'grad_norm' in self.config.suffix:
-            div = 1 + self.gp * tf.reduce_mean(tf.square(safer_norm(gradients, axis=1)))
+        if self.check_numerics:  
+            div = 1 + self.gp * tf.check_numerics(tf.reduce_mean(tf.square(safer_norm(gradients, axis=1))), 'penalty')
         else:
-            if self.check_numerics:  
-                div = 1 + self.gp * tf.check_numerics(tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0)), 'penalty')
-            else:
-                div = 1 + self.gp * tf.reduce_mean(tf.square(safer_norm(gradients, axis=1) - 1.0))
+            div = 1 + self.gp * tf.reduce_mean(tf.square(safer_norm(gradients, axis=1)))
 
         with tf.variable_scope('loss'):
             if self.config.gradient_penalty > 0:

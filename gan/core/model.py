@@ -126,21 +126,21 @@ class MMD_GAN(object):
         dbn = self.config.batch_norm & (self.config.gradient_penalty <= 0)
         self.discriminator = Discriminator(self.df_dim, self.dof_dim, dbn)
         # tf.summary.histogram("z", self.z)
-
+        
         self.G = generator(self.z, self.batch_size)
         
         if self.check_numerics:
             self.G = tf.check_numerics(self.G, 'self.G')
 
-        self.sampler = generator(self.sample_z, self.sample_size)
-        
         self.d_images_layers = self.discriminator(self.images, 
             self.real_batch_size, return_layers=True)
         self.d_G_layers = self.discriminator(self.G, self.batch_size,
                                              return_layers=True)
         self.d_images = self.d_images_layers['hF']
         self.d_G = self.d_G_layers['hF']
-            
+        
+        self.sampler = generator(self.sample_z, self.sample_size)
+        
         if self.config.is_train:
             self.set_loss(self.d_G, self.d_images)
 

@@ -23,8 +23,8 @@ def split_batch(batch_size, splits):
 
 
 local_device_protos = device_lib.list_local_devices()
-GPUS = [x.name for x in local_device_protos if x.device_type == 'GPU']
-
+#GPUS = [x.name for x in local_device_protos if x.device_type == 'GPU']
+GPUS = ['/gpu:0', '/gpu:1', '/gpu:2']
 
 class Generator:
     def __init__(self, dim, c_dim, output_size, use_batch_norm, prefix='g_'):
