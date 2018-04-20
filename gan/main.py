@@ -67,6 +67,8 @@ def main(_):
         from core.wgan_gp import WGAN_GP as Model
     elif 'cramer' in FLAGS.model:
         from core.cramer import Cramer_GAN as Model
+    elif 'gan' in FLAGS.model:
+        from core.gan import GAN as Model
         
 #    with tf.Session(config=sess_config) as sess:
     sess = tf.Session(config=sess_config)
