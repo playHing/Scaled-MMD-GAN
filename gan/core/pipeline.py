@@ -41,8 +41,6 @@ class Pipeline:
 
 class LMDB(Pipeline):
     def __init__(self, *args, **kwargs):
-#        print(*args)
-#        print(**kwargs)
         super(LMDB, self).__init__(*args, **kwargs)
         self.timer = kwargs.get('timer', None) 
         self.keys = []

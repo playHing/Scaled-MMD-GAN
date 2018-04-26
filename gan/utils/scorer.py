@@ -91,7 +91,7 @@ class Scorer(object):
         
         if len(self.output) > 0:
             if np.min([sc['mmd2'].mean() for sc in self.output]) > output['mmd2'].mean():
-                print('Saving BEST model (so far)')
+                print('Saving best model ...')
                 gan.save_checkpoint()
         self.output.append(output)
                 
@@ -108,7 +108,7 @@ class Scorer(object):
             bs = 2048
             new_Y = codes[:bs]
             X = self.train_codes[:bs]
-            print('3-sample stats so far: %d' % len(self.three_sample))
+            print('No. of copmuted 3-sample statics: %d' % len(self.three_sample))
             if len(self.three_sample) >= n:
                 saved_Z = self.three_sample[0]
                 mmd2_diff, test_stat, Y_related_sums = \

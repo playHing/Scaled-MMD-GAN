@@ -85,7 +85,6 @@ def Conv2D(name, input_dim, output_dim, filter_size, inputs, he_init=True, mask_
                 (filter_size, filter_size, input_dim, output_dim)
             )
 
-        # print "WARNING IGNORING GAIN"
         filter_values *= gain
 
         filters = lib.param(name+'.Filters', filter_values)

@@ -177,9 +177,9 @@ def variable_summary(var, name):
     mean = tf.reduce_mean(var)
     with tf.name_scope('absdev'):
         stddev = tf.reduce_mean(tf.abs(var - mean))
-    tf.summary.scalar(name + '_absdev', stddev)
+#    tf.summary.scalar(name + '_absdev', stddev)
 #    tf.summary.scalar(name + '_norm', tf.sqrt(tf.reduce_mean(tf.square(var))))
-    tf.summary.histogram(name + '_histogram', var)
+#    tf.summary.histogram(name + '_histogram', var)
         
 def variable_summaries(variable_dict):
     for name, var in variable_dict.items():

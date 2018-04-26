@@ -332,12 +332,10 @@ class MMD_GAN(object):
             
             
     def set_pipeline(self):
-        print('timer 0', self.timer)
         Pipeline = get_pipeline(self.dataset, self.config.suffix)
         pipe = Pipeline(self.output_size, self.c_dim, self.real_batch_size, 
                         os.path.join(self.data_dir, self.dataset), 
                         timer=self.timer, sample_dir=self.sample_dir)
-        print('timer 1', pipe.timer)
         self.images = pipe.connect()        
 
             
