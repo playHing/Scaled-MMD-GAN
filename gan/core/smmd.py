@@ -2,6 +2,7 @@ from .model import MMD_GAN, tf, np
 from .architecture import get_networks
 from .ops import safer_norm
 from . import  mmd
+from .mmd import _eps
 
 class SMMD_GAN(MMD_GAN):                   
     def set_loss(self, G, images):
@@ -53,10 +54,15 @@ class SMMD_GAN(MMD_GAN):
         if self.check_numerics:
             gradients = tf.check_numerics(gradients, 'gradients 0')
 
-        if self.check_numerics:  
-            div = 1 + self.gp * tf.check_numerics(tf.reduce_mean(tf.square(safer_norm(gradients, axis=1))), 'penalty')
+        if 'eps' in self.config.suffix:
+            one = _eps
         else:
-            div = 1 + self.gp * tf.reduce_mean(tf.square(safer_norm(gradients, axis=1)))
+            one = 1.
+
+        if self.check_numerics:  
+            div = one + self.gp * tf.check_numerics(tf.reduce_mean(tf.square(safer_norm(gradients, axis=1))), 'penalty')
+        else:
+            div = one + self.gp * tf.reduce_mean(tf.square(safer_norm(gradients, axis=1)))
 
         with tf.variable_scope('loss'):
             if self.config.gradient_penalty > 0:

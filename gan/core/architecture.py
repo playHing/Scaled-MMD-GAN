@@ -9,23 +9,12 @@ import tensorflow as tf
 from core.ops import batch_norm, conv2d, deconv2d, linear, lrelu
 from core.mmd import _check_numerics
 from utils.misc import conv_sizes
-from tensorflow.python.client import device_lib
 # Generators
 def check_numerics(x, name): 
     if _check_numerics:
         return tf.check_numerics(x, name)
     return x
     
-    
-def split_batch(batch_size, splits):
-    k = float(batch_size) / splits
-    return [int(k*(i+1)) - int(k*i) for i in range(splits)]
-
-
-local_device_protos = device_lib.list_local_devices()
-#GPUS = [x.name for x in local_device_protos if x.device_type == 'GPU']
-GPUS = ['/gpu:0', '/gpu:1', '/gpu:2']
-
 class Generator:
     def __init__(self, dim, c_dim, output_size, use_batch_norm, prefix='g_'):
         self.used = False
@@ -49,19 +38,11 @@ class Generator:
             self.g_bn5 = lambda x: x
             
     def __call__(self, seed, batch_size):
-        batch_split = split_batch(batch_size, len(GPUS))
-        seed_split = tf.split(seed, batch_split, axis=0)
-        outputs = []
-            
-        for gpu, batch_size_, seed_ in zip(GPUS, batch_split, seed_split):
-            with tf.variable_scope('generator') as scope:   
-                if self.used:
-                    scope.reuse_variables()
-                self.used = True
-                with tf.device(gpu):
-                    outputs.append(self.network(seed_, batch_size_))
-                    
-        return tf.concat(outputs, axis=0)
+        with tf.variable_scope('generator') as scope:   
+            if self.used:
+                scope.reuse_variables()
+            self.used = True
+            return self.network(seed, batch_size)
         
     def network(self, seed, batch_size):
         pass
@@ -163,24 +144,16 @@ class Discriminator:
             self.d_bn5 = lambda x: x
         
     def __call__(self, image, batch_size, return_layers=False):
-        batch_split = split_batch(batch_size, len(GPUS))
-        image_split = tf.split(image, batch_split, axis=0)
-        layers_ = []
+        with tf.variable_scope("discriminator") as scope:
+            if self.used:
+                scope.reuse_variables()
+            self.used = True
             
-        for gpu, batch_size_, image_ in zip(GPUS, batch_split, image_split):
-            with tf.variable_scope("discriminator") as scope:
-                if self.used:
-                    scope.reuse_variables()
-                self.used = True
-                with tf.device(gpu):
-                    layers_.append(self.network(image_, batch_size_))
+            layers = self.network(image, batch_size)
             
-        layers = dict([(k, tf.concat([l[k] for l in layers_], axis=0)) \
-                       for k in layers_[0].keys()])
-            
-        if return_layers:
-            return layers
-        return layers['hF']
+            if return_layers:
+                return layers
+            return layers['hF']
         
     def network(self, image, batch_size):
         pass
@@ -222,30 +195,29 @@ class FullConvDiscriminator(Discriminator):
 class ResNetDiscriminator(Discriminator):
     def network(self, image, batch_size):
         from core.resnet import block, ops
-        with tf.device('/gpu:1'):
-            image = tf.transpose(image, [0, 3, 1, 2]) # NHWC to NCHW
-            image = check_numerics(image, self.prefix + 'image')
-            h0 = lrelu(ops.conv2d.Conv2D(self.prefix + 'h0_conv', 3, self.dim, 
-                                         3, image, he_init=False)) 
-            h0 = check_numerics(h0, self.prefix + 'h0_conv')
-            h1 = block.ResidualBlock(self.prefix + 'res1', self.dim, 
-                                     2 * self.dim, 3, h0, resample='down')
-            h1 = check_numerics(h1, self.prefix + 'res1')
-            h2 = block.ResidualBlock(self.prefix + 'res2', 2 * self.dim, 
-                                     4 * self.dim, 3, h1, resample='down')
-            h2 = check_numerics(h2, self.prefix + 'res2')
-            h3 = block.ResidualBlock(self.prefix + 'res3', 4 * self.dim, 
-                                     8 * self.dim, 3, h2, resample='down')
-            h3 = check_numerics(h3, self.prefix + 'res3')
-            h4 = block.ResidualBlock(self.prefix + 'res4', 8 * self.dim, 
-                                     8 * self.dim, 3, h3, resample='down')
-            h4 = check_numerics(h4, self.prefix + 'res4')
-        
-            hF = tf.reshape(h4, [batch_size, -1])
-            hF = linear(hF, self.o_dim, self.prefix + 'h5_lin')
-            hF = check_numerics(hF, self.prefix + 'hF')
-            
-            return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}  
+        image = tf.transpose(image, [0, 3, 1, 2]) # NHWC to NCHW
+        image = check_numerics(image, self.prefix + 'image')
+        h0 = lrelu(ops.conv2d.Conv2D(self.prefix + 'h0_conv', 3, self.dim, 
+                                     3, image, he_init=False)) 
+        h0 = check_numerics(h0, self.prefix + 'h0_conv')
+        h1 = block.ResidualBlock(self.prefix + 'res1', self.dim, 
+                                 2 * self.dim, 3, h0, resample='down')
+        h1 = check_numerics(h1, self.prefix + 'res1')
+        h2 = block.ResidualBlock(self.prefix + 'res2', 2 * self.dim, 
+                                 4 * self.dim, 3, h1, resample='down')
+        h2 = check_numerics(h2, self.prefix + 'res2')
+        h3 = block.ResidualBlock(self.prefix + 'res3', 4 * self.dim, 
+                                 8 * self.dim, 3, h2, resample='down')
+        h3 = check_numerics(h3, self.prefix + 'res3')
+        h4 = block.ResidualBlock(self.prefix + 'res4', 8 * self.dim, 
+                                 8 * self.dim, 3, h3, resample='down')
+        h4 = check_numerics(h4, self.prefix + 'res4')
+    
+        hF = tf.reshape(h4, [batch_size, -1])
+        hF = linear(hF, self.o_dim, self.prefix + 'h5_lin')
+        hF = check_numerics(hF, self.prefix + 'hF')
+         
+        return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}  
 
         
 def get_networks(architecture):
