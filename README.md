@@ -1,14 +1,14 @@
 [//]: <links>
 [smmd]: https://arxiv.org/abs/
 
-# On gradient regularizers for MMD GANs: Scaled MMD
+# Scaled MMD GANs
 
 
-Official Tensorflow implementation for reproducing results of unsupervised image generation using [Scaled MMD][smmd].
+Official Tensorflow implementation for reproducing results of [On gradient regularizers for MMD GANs][smmd].
 
 
 ## Setup
-### install :
+### Install:
 
 `pip install -r requirements.txt`
 
@@ -16,33 +16,23 @@ The GPU compatible version of tensorflow is required for this code to work.
 
 
 ### Download CelebA dataset:
+
 ```
 cd scripts
-OUTPUT_DATA_DIR=/path/to/output/directory/  # path to the parent directory containing the datasets
+OUTPUT_DATA_DIR=/path/to/output/directory/
 python scripts/download.py --datasets celebA --output_dir $OUTPUT_DATA_DIR
 ```
 
 ### Download ImageNet dataset:
 Please download ILSVRC2012 dataset from http://image-net.org/download-images
 
-### Preprocess dataset:
+### Preprocess ImageNet dataset:
 ```
-cd datasets
-IMAGENET_TRAIN_DIR=/path/to/imagenet/train/ # path to the parent directory of category directories named "n0*******".
+IMAGENET_TRAIN_DIR=/path/to/imagenet/train/ 
 PREPROCESSED_DATA_DIR=/path/to/save_dir/
+TFRECORDS_DATA_DIR=/path/to/output/tfrecords 
 bash preprocess.sh $IMAGENET_TRAIN_DIR $PREPROCESSED_DATA_DIR
-# Make the list of image-label pairs for all images (1000 categories, 1281167 images).
-python imagenet.py $PREPROCESSED_DATA_DIR
-# (optional) Make the list of image-label pairs for dog and cat images (143 categories, 180373 images).
-python imagenet_dog_and_cat.py $PREPROCESSED_DATA_DIR
-```
-
-### Convert imagenet jpeg images to tfrecords:
-```
-cd scripts
-OUTPUT_DATA_DIR=/path/to/output/tfrecords 
-TRAIN_DIR=/path/to/train/directory
-build_imagenet_data --train_directory=$TRAIN_DIR --output_directory=$OUTPUT_DATA_DIR
+build_imagenet_data --train_directory=$PREPROCESSED_DATA_DIR --output_directory=$TFRECORDS_DATA_DIR
 ```
 
 ### Download inception model: 
@@ -63,10 +53,9 @@ CUDA_VISIBLE_DEVICES=0,1,2 python -m ipdb gan/main.py -dataset imagenet -data_di
 ```
 
 
-- Examples of generated images at 150K iterations:
+![image](https://github.com/MichaelArbel/Scaled-MMD-GAN/samples/imagenet.jpg)
 
-![image](https://github.com/MichaelArbel/Scaled-MMD-GAN/imagenet_sample.jpg)
-
+For any question, please feel free to contact Michael Arbel (`michael.n.arbel@gmail.com`)
 
 ### References
 Michael Arbel, Dougal J. Southerland, Mikolaj Binkowski, Arthur Gretton. *On gradient regularizers for MMD GANs*. [arXiv][smmd]
