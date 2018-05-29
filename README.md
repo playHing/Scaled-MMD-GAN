@@ -49,7 +49,7 @@ DATADIR=/path/to/datadir/
 OUTDIR=/path/to/outputdir/
 CONFIG=configs/imagenet_smmd.yml
 # multi-GPU: 3 GPUs
-CUDA_VISIBLE_DEVICES=0,1,2 python -m ipdb gan/main.py -dataset imagenet -data_dir $DATADIR -name  -config_file $CONFIG -out_dir $OUTDIR -multi_gpu true
+CUDA_VISIBLE_DEVICES=0,1,2 python gan/main.py -dataset imagenet -data_dir $DATADIR -name  -config_file $CONFIG -out_dir $OUTDIR -multi_gpu true
 ```
 
 
