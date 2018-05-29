@@ -5,7 +5,7 @@ class WGAN_GP(MMD_GAN):
     def __init__(self, sess, config, **kwargs):
         config.dof_dim = 1
         super(WGAN_GP, self).__init__(sess, config, **kwargs)
-        
+
     def set_loss(self, G, images):
         alpha = tf.random_uniform(shape=[self.batch_size, 1, 1, 1])
         real_data = self.images
@@ -21,8 +21,11 @@ class WGAN_GP(MMD_GAN):
         self.gp = tf.get_variable('gradient_penalty', dtype=tf.float32,
                                   initializer=self.config.gradient_penalty)
 
-        self.d_loss = tf.reduce_mean(G) - tf.reduce_mean(images) + self.gp * gradient_penalty
+        self.d_loss = tf.reduce_mean(G) - tf.reduce_mean(images)
         self.g_loss = -tf.reduce_mean(G)
+        if self.config.gradient_penalty > 0:
+            self.d_loss += self.gp * gradient_penalty
+
         self.optim_name = 'wgan_gp%d_loss' % int(self.config.gradient_penalty)
 
         tf.summary.scalar(self.optim_name + ' G', self.g_loss)

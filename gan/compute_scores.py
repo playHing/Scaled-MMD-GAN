@@ -18,7 +18,7 @@ class TqdmUpTo(tqdm):
 
 
 class Inception(object):
-    def __init__(self):
+    def __init__(self,sess):
         MODEL_DIR = '/tmp/imagenet'
         DATA_URL = ('http://download.tensorflow.org/models/image/imagenet/'
                     'inception-2015-12-05.tgz')
@@ -44,7 +44,8 @@ class Inception(object):
             tf.import_graph_def(graph_def, name='')
 
         # Works with an arbitrary minibatch size.
-        self.sess = sess = tf.Session()
+        #self.sess = sess = tf.Session()
+        self.sess = sess
         #with sess:
         pool3 = sess.graph.get_tensor_by_name('pool_3:0')
         ops = pool3.graph.get_operations()
@@ -67,13 +68,13 @@ class Inception(object):
 
 
 class LeNet(object):
-    def __init__(self):
+    def __init__(self,sess):
         MODEL_DIR = 'lenet/saved_model'
         self.softmax_dim = 10
         self.coder_dim = 512
 
-        self.sess = sess = tf.Session()
-
+        #self.sess = sess = tf.Session()
+        self.sess = sess
         tf.saved_model.loader.load(
             sess, [tf.saved_model.tag_constants.TRAINING], MODEL_DIR)
         g = sess.graph
@@ -219,7 +220,7 @@ def polynomial_mmd_averages(codes_g, codes_r, n_subsets=50, subset_size=1000,
         for i in bar:
             g = codes_g[choice(len(codes_g), subset_size, replace=False)]
             r = codes_r[choice(len(codes_r), subset_size, replace=False)]
-            o = polynomial_mmd(g, r, **kernel_args, var_at_m=m, ret_var=ret_var)
+            o = polynomial_mmd(g, r,  var_at_m=m, ret_var=ret_var,**kernel_args)
             if ret_var:
                 mmds[i], vars[i] = o
             else:

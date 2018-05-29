@@ -1,41 +1,73 @@
-# Official Tensorflow implementation for reproducing the results of [*Demystifying MMD GANs*](https://arxiv.org/abs/1801.01401).
+[//]: <links>
+[smmd]: https://arxiv.org/abs/
 
-The repository contains code for reproducing experiments of uncoditional image generation with MMD GANs and other benchmark GAN models.
+# On gradient regularizers for MMD GANs: Scaled MMD
 
-If you're only interested in the new KID metric, check out [`compute_scores.py`](gan/compute_scores.py).
+
+Official Tensorflow implementation for reproducing results of unsupervised image generation using [Scaled MMD][smmd].
+
+
+## Setup
+### install :
+
+`pip install -r requirements.txt`
+
+The GPU compatible version of tensorflow is required for this code to work.
+
+
+### Download CelebA dataset:
+```
+cd scripts
+OUTPUT_DATA_DIR=/path/to/output/directory/  # path to the parent directory containing the datasets
+python scripts/download.py --datasets celebA --output_dir $OUTPUT_DATA_DIR
+```
+
+### Download ImageNet dataset:
+Please download ILSVRC2012 dataset from http://image-net.org/download-images
+
+### Preprocess dataset:
+```
+cd datasets
+IMAGENET_TRAIN_DIR=/path/to/imagenet/train/ # path to the parent directory of category directories named "n0*******".
+PREPROCESSED_DATA_DIR=/path/to/save_dir/
+bash preprocess.sh $IMAGENET_TRAIN_DIR $PREPROCESSED_DATA_DIR
+# Make the list of image-label pairs for all images (1000 categories, 1281167 images).
+python imagenet.py $PREPROCESSED_DATA_DIR
+# (optional) Make the list of image-label pairs for dog and cat images (143 categories, 180373 images).
+python imagenet_dog_and_cat.py $PREPROCESSED_DATA_DIR
+```
+
+### Convert imagenet jpeg images to tfrecords:
+```
+cd scripts
+OUTPUT_DATA_DIR=/path/to/output/tfrecords 
+TRAIN_DIR=/path/to/train/directory
+build_imagenet_data --train_directory=$TRAIN_DIR --output_directory=$OUTPUT_DATA_DIR
+```
+
+### Download inception model: 
+
+`python source/inception/download.py --outfile=datasets/inception_model`
+
+
+## Training
+
+
+### Unsupervised image generation of 64x64 ImageNet images:
+```
+DATADIR=/path/to/datadir/
+OUTDIR=/path/to/outputdir/
+CONFIG=configs/imagenet_smmd.yml
+# multi-GPU: 3 GPUs
+CUDA_VISIBLE_DEVICES=0,1,2 python -m ipdb gan/main.py -dataset imagenet -data_dir $DATADIR -name  -config_file $CONFIG -out_dir $OUTDIR -multi_gpu true
+```
+
+
+- Examples of generated images at 150K iterations:
+
+![image](https://github.com/MichaelArbel/Scaled-MMD-GAN/imagenet_sample.jpg)
+
 
 ### References
-Mikołaj Bińkowski, Dougal J. Sutherland, Michael N. Arbel and Athur Gretton. 
-[*Demystifying MMD GANs*](https://arxiv.org/abs/1801.01401).
-ICLR 2018 ([openreview](https://openreview.net/forum?id=r1lUOzWCW); [poster](http://www.gatsby.ucl.ac.uk/~dougals/posters/iclr-mmd-gans.pdf)).
+Michael Arbel, Dougal J. Southerland, Mikolaj Binkowski, Arthur Gretton. *On gradient regularizers for MMD GANs*. [arXiv][smmd]
 
-### Model features
-- Uses gradient penalty, analoguous to WGAN-GP ([Gulrajani et al *Improved Training of Wassersein GAN*](https://arxiv.org/abs/1704.00028). 
-- Evaluates models using three different methods: [*Inception Score*](https://arxiv.org/abs/1606.03498), [*Fréchet Inception Distance (FID)*](https://arxiv.org/abs/1706.08500), and proposed *Kernel Inception Distance (KID)*.
-- Adaptively decreses the learning rate using 3-sample test. If KID does not improve (as compared to evaluation 20k steps earlier) three times in a row, learning rate is halved.
-
-### Requirements
-- python >= 3.6
-- tensorflow-gpu >= 1.3
-- PIL, lmdb, numpy, matplotlib
-- machine with GPU(s). At least 2 GPUs are needed for experiments with Celeb-A dataset.
-
-### Datasets
-The code works with several common datasets with different resolutions. The experiments include
-- 28x28 MNIST,
-- 32x32 Cifar10,
-- 64x64 LSUN Bedrooms,
-- 160x160 Celeb-A.
- 
-LSUN, MNIST and Celeb-A datasets can be downloaded using the [script](https://github.com/carpedm20/DCGAN-tensorflow/blob/master/download.py).
-
-### Benchmarks
-
-We compare MMD GANs with [WGAN-GP](https://arxiv.org/abs/1704.00028) and [Cramer GAN](https://arxiv.org/abs/1705.10743).
-
-
-### Running the code
-Each of the following scripts launches the training of MMD GAN on respective dataset: `mnist.sh`, `cifar10.sh`, `lsun.sh`, `celeba.sh`. To train the benchmark models, change the variable `$MODEL` to `WGAN` or `CRAMER`. To train all three models set `$MODEL=ALL`.
-
-Feel free to contact Mikołaj Bińkowski (`mikbinkowski at gmail.com`) with any 
-questions and issues.

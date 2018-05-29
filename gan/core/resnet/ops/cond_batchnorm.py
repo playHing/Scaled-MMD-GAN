@@ -1,4 +1,4 @@
-import resnet as lib
+from ... import resnet as lib
 
 import numpy as np
 import tensorflow as tf
