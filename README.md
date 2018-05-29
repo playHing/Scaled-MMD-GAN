@@ -53,7 +53,7 @@ CUDA_VISIBLE_DEVICES=0,1,2 python -m ipdb gan/main.py -dataset imagenet -data_di
 ```
 
 
-![image](https://github.com/MichaelArbel/Scaled-MMD-GAN/samples/imagenet.jpg)
+![image](https://github.com/MichaelArbel/Scaled-MMD-GAN/blob/master/samples/imagenet.jpg)
 
 For any question, please feel free to contact Michael Arbel (`michael.n.arbel@gmail.com`)
 
