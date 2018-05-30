@@ -1,5 +1,5 @@
 [//]: <links>
-[smmd]: https://arxiv.org/abs/
+[smmd]: https://arxiv.org/abs/1805.11565
 
 # Scaled MMD GANs
 
@@ -43,7 +43,7 @@ build_imagenet_data --train_directory=$PREPROCESSED_DATA_DIR --output_directory=
 ## Training
 
 
-### Unsupervised image generation of 64x64 ImageNet images:
+### Unsupervised image generation of 64x64 ImageNet:
 ```
 DATADIR=/path/to/datadir/
 OUTDIR=/path/to/outputdir/
