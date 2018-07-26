@@ -442,6 +442,8 @@ def get_networks(architecture):
         return DCGAN5Generator, DCGAN5Discriminator
     elif architecture == 'sngan':
         return SNGANGenerator, SNGANDiscriminator
+    elif architecture == 'sngan-dcgan5':
+        return SNGANGenerator, DCGAN5Discriminator
     elif architecture == 'snresnet':
         return SNResNetGenerator, SNResNetDiscriminator
     elif architecture == 'cond_snresnet':
