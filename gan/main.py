@@ -117,6 +117,10 @@ parser.add_argument('-num_gpus',                    default=1,              type
 parser.add_argument('-with_labels',                 default=False,          type=str2bool,  help='Conditional GAN')
 
 
+
+parser.add_argument('-use_gaussian_noise',          default=False,          type=str2bool,  help='Conditional GAN')
+
+
 FLAGS = make_flags(parser)
 
 FLAGS.num_gpus = len(os.environ["CUDA_VISIBLE_DEVICES"].split(","))

@@ -365,10 +365,20 @@ class MMD_GAN(object):
             print('[*] L2 discriminator penalty added')
 
     def add_scaling(self):
+        if self.config.use_gaussian_noise:
+            x_hat_data = tf.random_normal(self.images.get_shape().as_list(), mean=0.,
+                                   stddev=10., dtype=tf.float32, name='x_scaling')
+            x_hat = self.discriminator(x_hat_data, self.batch_size, update_collection="NO_OPS")
+        else:
+            # Avoid rebuilding a new discriminator network subgraph
+            x_hat_data = self.images
+            x_hat = self.d_images
 
-        x_hat_data = self.images
-        # Avoid rebuilding a new discriminator network subgraph
-        x_hat = self.d_images
+        
+
+
+        
+
 
         norm2_jac = squared_norm_jacobian(x_hat, x_hat_data)
 
