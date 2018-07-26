@@ -226,8 +226,7 @@ class MMD_GAN(object):
                          self.imageRearrange(tf.clip_by_value(self.images, 0, 1), block)))
         summaries.append(tf.summary.image("train/gen_image",
                          self.imageRearrange(tf.clip_by_value(self.G_NHWC, 0, 1), block)))
-        self.TrainSummary = tf.summary.merge(summaries)
-
+        #self.TrainSummary = tf.summary.merge(summaries)
         self.saver = tf.train.Saver(max_to_keep=self.max_to_keep)
         print('[*] Model built.')
 
@@ -551,6 +550,7 @@ class MMD_GAN(object):
         self.sess.run(tf.global_variables_initializer())
 
         print('[*] Variables initialized.')
+        self.TrainSummary = tf.summary.merge_all()
         self._ensure_dirs('log')
         self.writer = tf.summary.FileWriter(self.log_dir, self.sess.graph)
 
