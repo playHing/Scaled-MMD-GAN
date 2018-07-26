@@ -192,24 +192,37 @@ def read_and_scale(file, size=64):
     return center_and_scale(im, size=size)
 
 
-def variable_summary(var, name):
+def variable_summary(var, name, with_singular_values=False):
     """Attach a lot of summaries to a Tensor (for TensorBoard visualization)."""
 #    with tf.get_variable_scope():
     if var is None:
         print("Variable Summary: None value for variable '%s'" % name)
         return
+
+    if with_singular_values:
+       shape_var =  var.get_shape().as_list()
+       col = np.prod(np.array(shape_var[:-1]))
+       new_var = tf.reshape(tf.transpose(var, [3,0,1,2] ), [shape_var[-1],col])
+       svd = tf.svd(new_var, compute_uv=False)
+       svd = svd/svd[0]
+       shape_s = svd.get_shape().as_list()
+       condition_num = svd[0]/svd[shape_s[0]-1]
+       tf.summary.scalar(name + '_condition_number', condition_num)
+       tf.summary.tensor_summary(name + '_singular_val', svd)
+
     var = tf.clip_by_value(var, -1000., 1000.)
     mean = tf.reduce_mean(var)
     with tf.name_scope('absdev'):
         stddev = tf.reduce_mean(tf.abs(var - mean))
 
+
     tf.summary.scalar(name + '_absdev', stddev)
     tf.summary.histogram(name + '_histogram', var)
 
 
-def variable_summaries(variable_dict):
+def variable_summaries(variable_dict,with_singular_values=False):
     for name, var in variable_dict.items():
-        variable_summary(var, name)
+        variable_summary(var, name,with_singular_values=with_singular_values)
 
 
 def conv_sizes(size, layers, stride=2):

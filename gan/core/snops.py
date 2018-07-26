@@ -68,7 +68,7 @@ def conv_cond_concat(x, y):
 
 def conv2d(input_, output_dim,
            k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.02, scale=1.0, with_learnable_sn_scale=False, with_sn=False,
-           name="snconv2d",  update_collection=None, data_format='NCHW'):
+           name="snconv2d",  update_collection=None, data_format='NCHW',with_singular_values=False):
     with tf.variable_scope(name):
         scope_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                                        tf.get_variable_scope().name)
@@ -91,16 +91,19 @@ def conv2d(input_, output_dim,
 
         if not has_summary:
             if with_sn:
-                variable_summaries({'W': w, 'b': biases, 's': s, 'sigma_w': sigma})
+                variable_summaries({ 'b': biases, 's': s, 'sigma_w': sigma})
+                variable_summaries({'W': w},with_singular_values=with_singular_values)
             else:
-                variable_summaries({'W': w, 'b': biases})
+                variable_summaries({'b': biases})
+                variable_summaries({'W': w},with_singular_values=with_singular_values)
+
 
         return conv
 
 
 def deconv2d(input_, output_shape,
              k_h=5, k_w=5, d_h=2, d_w=2, stddev=0.02, scale=1.0, with_learnable_sn_scale=False, with_sn=False,
-             name="deconv2d", with_w=False, update_collection=None, data_format='NCHW'):
+             name="deconv2d", with_w=False, update_collection=None, data_format='NCHW',with_singular_values=False):
     with tf.variable_scope(name):
         scope_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                                        tf.get_variable_scope().name)
@@ -124,9 +127,11 @@ def deconv2d(input_, output_shape,
 
         if not has_summary:
             if with_sn:
-                variable_summaries({'W': w, 'b': biases, 's': s, 'sigma_w': sigma})
+                variable_summaries({ 'b': biases, 's': s, 'sigma_w': sigma})
+                variable_summaries({'W': w},with_singular_values=with_singular_values)
             else:
-                variable_summaries({'W': w, 'b': biases})
+                variable_summaries({'b': biases})
+                variable_summaries({'W': w},with_singular_values=with_singular_values)
 
         if with_w:
             return deconv, w, biases
@@ -161,7 +166,7 @@ def lrelu(x, leak=0.2, name="lrelu"):
     return tf.maximum(x, leak*x)
 
 
-def linear(input_, output_size, name="Linear", stddev=0.01, scale=1.0, with_learnable_sn_scale=False, with_sn=False, bias_start=0.0, with_w=False, update_collection=None):
+def linear(input_, output_size, name="Linear", stddev=0.01, scale=1.0, with_learnable_sn_scale=False, with_sn=False, bias_start=0.0, with_w=False, update_collection=None,with_singular_values=False):
     shape = input_.get_shape().as_list()
 
     with tf.variable_scope(name):
@@ -188,9 +193,11 @@ def linear(input_, output_size, name="Linear", stddev=0.01, scale=1.0, with_lear
 
         if not has_summary:
             if with_sn:
-                variable_summaries({'W': matrix, 'b': bias, 's': s, 'sigma_w': sigma})
+                variable_summaries({'b': bias, 's': s, 'sigma_w': sigma})
+                variable_summaries({'W': matrix}, with_singular_values=with_singular_values) 
             else:
-                variable_summaries({'W': matrix, 'b': bias})
+                variable_summaries({'b': bias})
+                variable_summaries({'W': matrix}, with_singular_values=with_singular_values) 
 
         if with_w:
             return mul + bias, matrix, bias
@@ -198,7 +205,7 @@ def linear(input_, output_size, name="Linear", stddev=0.01, scale=1.0, with_lear
             return mul + bias
 
 
-def linear_one_hot(input_, output_size, num_classes, name="Linear_one_hot", stddev=0.01, scale=1.0, with_learnable_sn_scale=False, with_sn=False, bias_start=0.0, with_w=False, update_collection=None):
+def linear_one_hot(input_, output_size, num_classes, name="Linear_one_hot", stddev=0.01, scale=1.0, with_learnable_sn_scale=False, with_sn=False, bias_start=0.0, with_w=False, update_collection=None,with_singular_values=False):
     with tf.variable_scope(name):
         scope_vars = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES,
                                        tf.get_variable_scope().name)
@@ -221,9 +228,10 @@ def linear_one_hot(input_, output_size, num_classes, name="Linear_one_hot", stdd
 
         if not has_summary:
             if with_sn:
-                variable_summaries({'W': matrix,  's': s, 'sigma_w': sigma})
+                variable_summaries({'s': s, 'sigma_w': sigma})
+                variable_summaries({'W': matrix}, with_singular_values=with_singular_values) 
             else:
-                variable_summaries({'W': matrix})
+                variable_summaries({'W': matrix}, with_singular_values=with_singular_values) 
 
         if with_w:
             return embed, matrix

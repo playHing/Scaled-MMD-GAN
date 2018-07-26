@@ -323,10 +323,10 @@ class CondProjectionSNResNetDiscriminator(CondDiscriminator):
 class DCGANDiscriminator(Discriminator):
     def network(self, image, batch_size, update_collection):
         o_dim = self.o_dim if (self.o_dim > 0) else 8 * self.dim
-        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format))
-        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
-        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
-        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True))
+        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
+        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
+        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
         hF = linear(tf.reshape(h3, [batch_size, -1]), o_dim, self.prefix + 'h4_lin', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale)
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF}
 
@@ -334,22 +334,22 @@ class DCGANDiscriminator(Discriminator):
 class DCGAN5Discriminator(Discriminator):
     def network(self, image, batch_size, update_collection):
         o_dim = self.o_dim if (self.o_dim > 0) else 16 * self.dim
-        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format))
-        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
-        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
-        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
-        h4 = lrelu(self.d_bn4(conv2d(h3, self.dim * 16, name=self.prefix + 'h4_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True))
+        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
+        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
+        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
+        h4 = lrelu(self.d_bn4(conv2d(h3, self.dim * 16, name=self.prefix + 'h4_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
         hF = linear(tf.reshape(h4, [batch_size, -1]), o_dim, self.prefix + 'h6_lin', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale)
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'h4': h4, 'hF': hF}
 
 
 class FullConvDiscriminator(Discriminator):
     def network(self, image, batch_size, update_collection):
-        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format))
-        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
-        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
-        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format)))
-        hF = lrelu(self.d_bn4(conv2d(h3, self.o_dim, name=self.prefix + 'hF_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale)))
+        h0 = lrelu(conv2d(image, self.dim, name=self.prefix + 'h0_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True))
+        h1 = lrelu(self.d_bn1(conv2d(h0, self.dim * 2, name=self.prefix + 'h1_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
+        h2 = lrelu(self.d_bn2(conv2d(h1, self.dim * 4, name=self.prefix + 'h2_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
+        h3 = lrelu(self.d_bn3(conv2d(h2, self.dim * 8, name=self.prefix + 'h3_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale, data_format=self.format,with_singular_values=True)))
+        hF = lrelu(self.d_bn4(conv2d(h3, self.o_dim, name=self.prefix + 'hF_conv', update_collection=update_collection, with_sn=self.with_sn, scale=self.scale, with_learnable_sn_scale=self.with_learnable_sn_scale,with_singular_values=True)))
         hF = tf.reshape(hF, [batch_size, -1])
         return {'h0': h0, 'h1': h1, 'h2': h2, 'h3': h3, 'hF': hF}
 
@@ -395,13 +395,13 @@ class InjectiveDiscriminator(Discriminator):
 class SNGANDiscriminator(Discriminator):
     # Discriminator used in 'Spectral Normalization in GANs', based on https://github.com/minhnhat93/tf-SNDCGAN/blob/master/net.py
     def network(self, image, batch_size, update_collection):
-        c0_0 = lrelu(conv2d(image,  64, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c0_0', data_format=self.format))
-        c0_1 = lrelu(conv2d(c0_0, 128, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c0_1', data_format=self.format))
-        c1_0 = lrelu(conv2d(c0_1, 128, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c1_0', data_format=self.format))
-        c1_1 = lrelu(conv2d(c1_0, 256, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c1_1', data_format=self.format))
-        c2_0 = lrelu(conv2d(c1_1, 256, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c2_0', data_format=self.format))
-        c2_1 = lrelu(conv2d(c2_0, 512, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c2_1', data_format=self.format))
-        c3_0 = lrelu(conv2d(c2_1, 512, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c3_0', data_format=self.format))
+        c0_0 = lrelu(conv2d(image,  64, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c0_0', data_format=self.format,with_singular_values=True))
+        c0_1 = lrelu(conv2d(c0_0, 128, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c0_1', data_format=self.format,with_singular_values=True))
+        c1_0 = lrelu(conv2d(c0_1, 128, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c1_0', data_format=self.format,with_singular_values=True))
+        c1_1 = lrelu(conv2d(c1_0, 256, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c1_1', data_format=self.format,with_singular_values=True))
+        c2_0 = lrelu(conv2d(c1_1, 256, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c2_0', data_format=self.format,with_singular_values=True))
+        c2_1 = lrelu(conv2d(c2_0, 512, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c2_1', data_format=self.format,with_singular_values=True))
+        c3_0 = lrelu(conv2d(c2_1, 512, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c3_0', data_format=self.format,with_singular_values=True))
         c3_0 = tf.reshape(c3_0, [batch_size, -1])
         l4 = linear(c3_0, self.o_dim, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'l4')
         return {'h0': c0_0, 'h1': c0_1, 'h2': c1_0, 'h3': c1_1, 'h4': c2_0, 'h5': c2_1, 'h6': c3_0, 'hF': l4}
