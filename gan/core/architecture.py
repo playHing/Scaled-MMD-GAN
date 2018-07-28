@@ -395,13 +395,13 @@ class InjectiveDiscriminator(Discriminator):
 class SNGANDiscriminator(Discriminator):
     # Discriminator used in 'Spectral Normalization in GANs', based on https://github.com/minhnhat93/tf-SNDCGAN/blob/master/net.py
     def network(self, image, batch_size, update_collection):
-        c0_0 = lrelu(conv2d(image,  64, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c0_0', data_format=self.format,with_singular_values=True))
-        c0_1 = lrelu(conv2d(c0_0, 128, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c0_1', data_format=self.format,with_singular_values=True))
-        c1_0 = lrelu(conv2d(c0_1, 128, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c1_0', data_format=self.format,with_singular_values=True))
-        c1_1 = lrelu(conv2d(c1_0, 256, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c1_1', data_format=self.format,with_singular_values=True))
-        c2_0 = lrelu(conv2d(c1_1, 256, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c2_0', data_format=self.format,with_singular_values=True))
-        c2_1 = lrelu(conv2d(c2_0, 512, 4, 4, 2, 2, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c2_1', data_format=self.format,with_singular_values=True))
-        c3_0 = lrelu(conv2d(c2_1, 512, 3, 3, 1, 1, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c3_0', data_format=self.format,with_singular_values=True))
+        c0_0 = lrelu(conv2d(image, 64, 3, 3, 1, 1, with_sn=self.with_sn, with_learnable_sn_scale=self.with_learnable_sn_scale, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c0_0', data_format=self.format,with_singular_values=True))
+        c0_1 = lrelu(conv2d(c0_0, 128, 4, 4, 2, 2, with_sn=self.with_sn, with_learnable_sn_scale=self.with_learnable_sn_scale, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c0_1', data_format=self.format,with_singular_values=True))
+        c1_0 = lrelu(conv2d(c0_1, 128, 3, 3, 1, 1, with_sn=self.with_sn, with_learnable_sn_scale=self.with_learnable_sn_scale, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c1_0', data_format=self.format,with_singular_values=True))
+        c1_1 = lrelu(conv2d(c1_0, 256, 4, 4, 2, 2, with_sn=self.with_sn, with_learnable_sn_scale=self.with_learnable_sn_scale, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c1_1', data_format=self.format,with_singular_values=True))
+        c2_0 = lrelu(conv2d(c1_1, 256, 3, 3, 1, 1, with_sn=self.with_sn, with_learnable_sn_scale=self.with_learnable_sn_scale, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c2_0', data_format=self.format,with_singular_values=True))
+        c2_1 = lrelu(conv2d(c2_0, 512, 4, 4, 2, 2, with_sn=self.with_sn, with_learnable_sn_scale=self.with_learnable_sn_scale, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c2_1', data_format=self.format,with_singular_values=True))
+        c3_0 = lrelu(conv2d(c2_1, 512, 3, 3, 1, 1, with_sn=self.with_sn, with_learnable_sn_scale=self.with_learnable_sn_scale, update_collection=update_collection, stddev=0.02, name=self.prefix + 'c3_0', data_format=self.format,with_singular_values=True))
         c3_0 = tf.reshape(c3_0, [batch_size, -1])
         l4 = linear(c3_0, self.o_dim, with_sn=True, update_collection=update_collection, stddev=0.02, name=self.prefix + 'l4')
         return {'h0': c0_0, 'h1': c0_1, 'h2': c1_0, 'h3': c1_1, 'h4': c2_0, 'h5': c2_1, 'h6': c3_0, 'hF': l4}
