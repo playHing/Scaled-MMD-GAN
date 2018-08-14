@@ -61,5 +61,5 @@ CUDA_VISIBLE_DEVICES=0,1,2 python gan/main.py -dataset imagenet -data_dir $DATAD
 For any question, please feel free to contact Michael Arbel (`michael.n.arbel@gmail.com`)
 
 ### References
-Michael Arbel, Dougal J. Southerland, Mikolaj Binkowski, Arthur Gretton. *On gradient regularizers for MMD GANs*. [arXiv][smmd]
+Michael Arbel, Dougal J. Sutherland, Mikołaj Bińkowski, Arthur Gretton. *On gradient regularizers for MMD GANs*. [arXiv][smmd]
 
