@@ -20,7 +20,7 @@ The GPU compatible version of tensorflow is required for this code to work.
 ```
 cd scripts
 OUTPUT_DATA_DIR=/path/to/output/directory/
-python scripts/download.py --datasets celebA --output_dir $OUTPUT_DATA_DIR
+python scripts/download.py celebA -- $OUTPUT_DATA_DIR
 ```
 
 ### Download ImageNet dataset:
