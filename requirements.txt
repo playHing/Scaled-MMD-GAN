@@ -1,9 +1,10 @@
+# python==3.6.5
 scipy==1.0.0
 lmdb==0.93
 matplotlib==2.2.0
 numpy==1.14.2
 requests==2.18.4
-tensorflow_gpu==1.6.0
+# tensorflow_gpu==1.6.0
 six==1.11.0
 tqdm==4.19.6
 Pillow==5.1.0

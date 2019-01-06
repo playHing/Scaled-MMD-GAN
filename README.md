@@ -18,7 +18,6 @@ The GPU compatible version of tensorflow is required for this code to work.
 ### Download CelebA dataset:
 
 ```
-cd scripts
 OUTPUT_DATA_DIR=/path/to/output/directory/
 python scripts/download.py celebA -- $OUTPUT_DATA_DIR
 ```
@@ -63,3 +62,14 @@ For any question, please feel free to contact Michael Arbel (`michael.n.arbel@gm
 ### References
 Michael Arbel, Dougal J. Sutherland, Mikołaj Bińkowski, Arthur Gretton. *On gradient regularizers for MMD GANs*. [arXiv][smmd]
 
+
+
+## cifar-10
+```
+DATADIR="data/cifar-10-batches-py/"
+OUTDIR="out/"
+# multi-GPU: 1 GPUs
+CUDA_VISIBLE_DEVICES=0 python gan/main.py -name trial_1 -config_file configs/cifar10_smmd.yml
+```
+
+Experiment result in experiment/

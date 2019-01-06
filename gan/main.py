@@ -47,7 +47,7 @@ parser.add_argument('-batch_norm',                  default=False,          type
 parser.add_argument('-init',                        default=0.02,           type=float,     help='Initialization value [0.02]')
 # dimensions
 parser.add_argument('-batch_size',                  default=64,             type=int,       help='The size of batch images [1000]')
-parser.add_argument('-real_batch_size',             default=-1,            type=int,       help='The size of batch images for real samples. If -1 then same as batch_size [-1]')
+parser.add_argument('-real_batch_size',             default=-1,             type=int,       help='The size of batch images for real samples. If -1 then same as batch_size [-1]')
 parser.add_argument('-output_size',                 default=128,            type=int,       help='The size of the output images to produce [64]')
 parser.add_argument('-c_dim',                       default=3,              type=int,       help='Dimension of image color. [3]')
 parser.add_argument('-z_dim',                       default=128,            type=int,       help='Dimension of latent noise [128]')
@@ -60,15 +60,15 @@ parser.add_argument('-name',                        default="",             type
 parser.add_argument('-checkpoint_dir',              default="checkpoint",   type=str,       help='Directory name to save the checkpoints [checkpoint_mmd]')
 parser.add_argument('-sample_dir',                  default="sample",       type=str,       help='Directory name to save the image samples [samples_mmd]')
 parser.add_argument('-log_dir',                     default="log",          type=str,       help='Directory name to save the image samples [logs_mmd]')
-parser.add_argument('-data_dir',                    default="data",         type=str,       help='Directory containing datasets [./data]')
-parser.add_argument('-out_dir',                     default="",             type=str,       help='Directory name to save the outputs of the experiment : (log, sample, checkpoints)   [./data]')
+parser.add_argument('-data_dir',                    default="./data",       type=str,       help='Directory containing datasets [./data]')
+parser.add_argument('-out_dir',                     default="./out",        type=str,       help='Directory name to save the outputs of the experiment : (log, sample, checkpoints)   [./data]')
 parser.add_argument('-config_file',                 default="",             type=str,       help='path to the config file')
 
 
 # models
 parser.add_argument('-architecture',                default="dcgan",        type=str,       help='The name of the architecture [dcgan, g-resnet5, dcgan5]')
 parser.add_argument('-kernel',                      default="",             type=str,       help="The name of the kernel ['', 'mix_rbf', 'mix_rq', 'distance', 'dot', 'mix_rq_dot']")
-parser.add_argument('-model',                       default="mmd",          type=str,       help='The model type [mmd, smmd, swgan, wgan_gp]')
+parser.add_argument('-model',                       default="smmd",         type=str,       help='The model type [mmd, smmd, swgan, wgan_gp]')
 # training options
 parser.add_argument('-is_train',                    default=True,           type=str2bool,  help='True for training, False for testing [Train]')
 parser.add_argument('-visualize',                   default=False,          type=str2bool,  help='True for visualizing, False for nothing [False]')

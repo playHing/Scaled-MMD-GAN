@@ -184,7 +184,7 @@ class MMD_GAN(object):
         self.towers_d_grads = []
         self.update_ops = []
         with tf.variable_scope(tf.get_variable_scope()):
-            for i in xrange(self.config.num_gpus):
+            for i in range(self.config.num_gpus):
                 worker = '/gpu:%d' % i
                 device_setter = misc._create_device_setter(is_cpu_ps, worker, self.config.num_gpus, ps_device=self.consolidation_device)
                 with tf.device(device_setter):

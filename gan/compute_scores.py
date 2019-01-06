@@ -54,7 +54,7 @@ class Inception(object):
                 shape = [s.value for s in o.get_shape()]
                 if len(shape) and shape[0] == 1:
                     shape[0] = None
-                o._shape = tf.TensorShape(shape)
+                o.__dict__['_shape_val'] = tf.TensorShape(shape)
         w = sess.graph.get_operation_by_name(
             "softmax/logits/MatMul").inputs[1]
         self.coder = tf.squeeze(tf.squeeze(pool3, 2), 1)
